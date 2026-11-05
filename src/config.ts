@@ -34,8 +34,8 @@ export const ANALYSIS = {
 export const SUPPORT = {
   /** 最大の長さ（秒） */
   maxDurationSec: 10 * 60,
-  /** 最大解像度（短辺px）。1080p まで */
-  maxShortSidePx: 1080,
+  /** 最大解像度（短辺px）。4K（2160p）まで */
+  maxShortSidePx: 2160,
 } as const
 
 /** モデル・WASM の配置先（public/ からの相対パス。scripts/fetch-assets.mjs が配置する） */
