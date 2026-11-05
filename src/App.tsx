@@ -1,6 +1,5 @@
 // 画面遷移：動画選択 → 解析中 → 編集 の一本道
 import { useEffect, useRef, useState } from 'react'
-import type { Mode } from './analysis/types'
 import { SEGMENT_DEFAULTS, type SegmentParams } from './config'
 import { analyzeVideo, type AnalysisResult } from './video/analyzeVideo'
 import { UserFacingError } from './video/videoFile'
@@ -23,8 +22,7 @@ type State =
 function App() {
   const [state, setState] = useState<State>({ screen: 'select' })
   const [video, setVideo] = useState<SelectedVideo | null>(null)
-  const [mode, setMode] = useState<Mode>('idea')
-  // 区間のパラメータ。解析ごとにモードの初期値に戻す
+  // 区間のパラメータ。解析ごとに初期値に戻す
   const [params, setParams] = useState<SegmentParams>(SEGMENT_DEFAULTS.idea)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -49,7 +47,7 @@ function App() {
     const controller = new AbortController()
     abortRef.current = controller
     setState({ screen: 'analyzing', progress: 0 })
-    setParams(SEGMENT_DEFAULTS[mode])
+    setParams(SEGMENT_DEFAULTS.idea)
     const release = await keepScreenAwake()
     try {
       const result = await analyzeVideo(video.url, {
@@ -80,10 +78,8 @@ function App() {
       {state.screen === 'select' && (
         <SelectScreen
           video={video}
-          mode={mode}
           error={state.error}
           onSelectFile={selectFile}
-          onChangeMode={setMode}
           onStart={start}
         />
       )}
@@ -93,7 +89,6 @@ function App() {
       {state.screen === 'edit' && video && (
         <EditScreen
           video={video}
-          mode={mode}
           samples={state.samples}
           duration={state.duration}
           filmstrip={state.filmstrip}

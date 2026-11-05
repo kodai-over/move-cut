@@ -1,23 +1,20 @@
-// 動画選択画面：動画を1本選び、モードを選んで解析を始める
+// 動画選択画面：動画を1本選んで解析を始める
 import { useEffect, useState } from 'react'
-import type { Mode } from '../analysis/types'
 import type { SelectedVideo } from '../App'
-import { MODE_LABEL, formatDuration } from './labels'
+import { formatDuration } from './labels'
 import { createVideoElement, loadVideoInfo, supportWarnings, UserFacingError, type VideoInfo } from '../video/videoFile'
 
 interface Props {
   video: SelectedVideo | null
-  mode: Mode
   error?: string
   onSelectFile: (file: File | null) => void
-  onChangeMode: (mode: Mode) => void
   onStart: () => void
 }
 
 type InfoState = { status: 'idle' } | { status: 'loading' } | { status: 'ok'; info: VideoInfo } | { status: 'error'; message: string }
 type LoadResult = { url: string } & ({ status: 'ok'; info: VideoInfo } | { status: 'error'; message: string })
 
-export function SelectScreen({ video, mode, error, onSelectFile, onChangeMode, onStart }: Props) {
+export function SelectScreen({ video, error, onSelectFile, onStart }: Props) {
   const [loaded, setLoaded] = useState<LoadResult | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
 
@@ -86,17 +83,6 @@ export function SelectScreen({ video, mode, error, onSelectFile, onChangeMode, o
       {info.status === 'error' && <p className="message error">{info.message}</p>}
       {fileError && <p className="message error">{fileError}</p>}
       {warnings.length > 0 && <p className="message warning">{warnings.join(' ')}正式サポート外です。</p>}
-
-      <fieldset className="modes">
-        <legend>モード</legend>
-        {(Object.keys(MODE_LABEL) as Mode[]).map((m) => (
-          <label key={m} className={`mode ${mode === m ? 'selected' : ''}`}>
-            <input type="radio" name="mode" value={m} checked={mode === m} onChange={() => onChangeMode(m)} />
-            <span className="mode-title">{MODE_LABEL[m].title}</span>
-            <span className="mode-note">{MODE_LABEL[m].note}</span>
-          </label>
-        ))}
-      </fieldset>
 
       {error && <p className="message error">{error}</p>}
 

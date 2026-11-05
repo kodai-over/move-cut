@@ -1,23 +1,22 @@
 // 編集画面：上にプレビュー、下にタイムライン（コマの帯・動きの波形・区間の帯）。
-// 区間ごとに残す／捨てるを選び、選んだクリップをまとめて保存する。スライダーはAIの提案を作り直すときに使う
+// 区間の帯をタップで頭から再生、ダブルタップで残す／捨てるを切り替え、残すクリップをまとめて保存する。
+// スライダーはAIの提案を作り直すときに使う
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Mode, MotionSample } from '../analysis/types'
+import type { MotionSample } from '../analysis/types'
 import { toCsv } from '../analysis/motion'
 import { excludedIntervals, segmentMotion } from '../analysis/segment'
 import { SEGMENT_DEFAULTS, type SegmentParams } from '../config'
 import type { NumberedClip } from '../export/batch'
-import type { ClipExporter } from '../video/clipExporter'
 import type { FilmstripFrame } from '../video/analyzeVideo'
 import type { SelectedVideo } from '../App'
 import { baseName, downloadText } from './browser'
 import { ClipSaver } from './ClipSaver'
-import { MODE_LABEL, formatDuration } from './labels'
 import { ParamSliders } from './ParamSliders'
 import { Timeline } from './Timeline'
+import { useClipExporter } from './useClipExporter'
 
 interface Props {
   video: SelectedVideo
-  mode: Mode
   samples: MotionSample[]
   duration: number
   filmstrip: FilmstripFrame[]
@@ -30,7 +29,7 @@ interface Props {
 /** 区間を見分けるキー（区間が作り直されたら別のものとして扱う） */
 const clipKey = (c: { start: number; end: number }) => `${c.start}-${c.end}`
 
-export function EditScreen({ video, mode, samples, duration, filmstrip, frameAspect, params, onChangeParams, onBack }: Props) {
+export function EditScreen({ video, samples, duration, filmstrip, frameAspect, params, onChangeParams, onBack }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [currentTime, setCurrentTime] = useState(0)
   /** 最後にタップされた時刻（初回の再生準備中に続けてタップされた場合も最新を使う） */
@@ -46,45 +45,35 @@ export function EditScreen({ video, mode, samples, duration, filmstrip, frameAsp
 
   // 解析はやり直さず、区間の計算だけをやり直す
   const { clips: intervals, freezes } = useMemo(
-    () => segmentMotion(samples, duration, params, mode),
-    [samples, duration, params, mode],
+    () => segmentMotion(samples, duration, params, 'idea'),
+    [samples, duration, params],
   )
   const excluded = useMemo(() => excludedIntervals(samples), [samples])
   const clips = useMemo(() => intervals.map((c) => ({ ...c, keep: !discarded.has(clipKey(c)) })), [intervals, discarded])
-  const chosen: NumberedClip[] = clips.flatMap((c, i) => (c.keep ? [{ number: i + 1, clip: c }] : []))
+  const chosen: NumberedClip[] = useMemo(
+    () => clips.flatMap((c, i) => (c.keep ? [{ number: i + 1, clip: c }] : [])),
+    [clips],
+  )
   const selectedIndex = selectedKey === null ? -1 : clips.findIndex((c) => clipKey(c) === selectedKey)
   const selected = selectedIndex >= 0 ? selectedIndex : null
   const select = (i: number) => setSelectedKey(clipKey(intervals[i]))
 
-  // キーフレームの時刻を読む（開始位置の吸着用。フェーズ6で使う。ここでは目盛りとして表示する）。
-  // 書き出し中は ffmpeg.wasm が2つ同時に動いてメモリを圧迫しないよう読むのをやめ、終わってから読み直す
-  const hasKeyframes = keyframes !== null
+  // ffmpeg.wasm は1つだけ使い回し、キーフレームの読み取りと書き出しを順番に実行する
+  const run = useClipExporter(video.file)
+
+  // キーフレームの時刻を読む（開始位置の吸着用。フェーズ6で使う。ここでは目盛りとして表示する）
   useEffect(() => {
-    if (busy || hasKeyframes) return
     let cancelled = false
-    const holder: { exporter: ClipExporter | null } = { exporter: null }
-    void (async () => {
-      try {
-        const { createClipExporter } = await import('../video/clipExporter')
-        if (cancelled) return
-        holder.exporter = await createClipExporter(video.file)
-        if (cancelled) return
-        const times = await holder.exporter.keyframeTimes()
-        if (!cancelled) setKeyframes(times)
-      } catch (e) {
+    run((exporter) => exporter.keyframeTimes())
+      .then((times) => !cancelled && setKeyframes(times))
+      .catch((e) => {
         // 読めなくても編集・保存はできるので、目盛りを出さないだけにする
         if (!cancelled) console.warn('キーフレームを読めませんでした', e)
-      } finally {
-        void holder.exporter?.dispose()
-        holder.exporter = null
-      }
-    })()
+      })
     return () => {
       cancelled = true
-      void holder.exporter?.dispose()
-      holder.exporter = null
     }
-  }, [video.file, busy, hasKeyframes])
+  }, [run])
 
   // クリップだけを再生しているときは、終わりで止める（timeupdate は間隔が粗いので毎フレーム確かめる）
   useEffect(() => {
@@ -142,6 +131,7 @@ export function EditScreen({ video, mode, samples, duration, filmstrip, frameAsp
   }
 
   const toggleKeep = (i: number) => {
+    if (busy) return
     const key = clipKey(intervals[i])
     setDiscarded((prev) => {
       const next = new Set(prev)
@@ -174,7 +164,7 @@ export function EditScreen({ video, mode, samples, duration, filmstrip, frameAsp
         onPause={() => setPlayingClip(null)}
       />
       <p className="meta">
-        {video.file.name} ・ {MODE_LABEL[mode].title} ・ 骨格で判定 {Math.round(skeletonRatio * 100)}%
+        {video.file.name} ・ 骨格で判定 {Math.round(skeletonRatio * 100)}%
       </p>
 
       {samples.length === 0 ? (
@@ -194,18 +184,18 @@ export function EditScreen({ video, mode, samples, duration, filmstrip, frameAsp
           currentTime={currentTime}
           selected={selected}
           onSeek={seek}
-          onSelectClip={(i, time) => {
-            select(i)
-            seek(time)
-          }}
+          onTapClip={playClip}
+          onDoubleTapClip={toggleKeep}
         />
       )}
       <p className="hint">
-        区間の帯（青）をタップで選択、下の一覧でそのクリップだけを再生できます。オレンジはフリーズ、灰色は動きとして数えなかった時間。実線が開始閾値、破線が終了閾値です。
+        区間の帯をタップでそのクリップを頭から再生、ダブルタップで残す（青）／捨てる（点線）を切り替えます。オレンジはフリーズ、灰色は動きとして数えなかった時間。実線が開始閾値、破線が終了閾値です。
       </p>
 
       <div className="select-all">
-        <span className="summary">クリップ {clips.length}本</span>
+        <span className="summary">
+          {playingClip !== null ? `クリップ${playingClip + 1}を再生中` : `クリップ ${clips.length}本`}
+        </span>
         <button type="button" className="button ghost" onClick={() => setAll(true)} disabled={busy}>
           すべて残す
         </button>
@@ -213,24 +203,14 @@ export function EditScreen({ video, mode, samples, duration, filmstrip, frameAsp
           すべて捨てる
         </button>
       </div>
-      <ul className="clip-rows">
-        {clips.map((c, i) => (
-          <li key={clipKey(c)} className={`clip-row${c.keep ? ' keep' : ''}${selected === i ? ' selected' : ''}`}>
-            <button type="button" className="clip-row-play" onClick={() => playClip(i)}>
-              <span className="clip-title">
-                {i + 1}. {formatDuration(c.start)}〜{formatDuration(c.end)}
-              </span>
-              <span className="clip-meta">{formatDuration(c.end - c.start)}{playingClip === i ? ' ・ 再生中' : ''}</span>
-            </button>
-            <label className="clip-check">
-              <input type="checkbox" checked={c.keep} onChange={() => toggleKeep(i)} disabled={busy} />
-              <span>{c.keep ? '残す' : '捨てる'}</span>
-            </label>
-          </li>
-        ))}
-      </ul>
-
-      <ClipSaver video={video} duration={duration} chosen={chosen} onBusyChange={setBusy} onBeforeStart={stopPreview} />
+      <ClipSaver
+        video={video}
+        duration={duration}
+        chosen={chosen}
+        run={run}
+        onBusyChange={setBusy}
+        onBeforeStart={stopPreview}
+      />
 
       <details className="suggest-settings">
         <summary>AIの提案を調整する</summary>
@@ -238,9 +218,8 @@ export function EditScreen({ video, mode, samples, duration, filmstrip, frameAsp
         <fieldset className="plain" disabled={busy}>
           <ParamSliders
             params={params}
-            showStillSec={mode === 'idea'}
             onChange={onChangeParams}
-            onReset={() => onChangeParams(SEGMENT_DEFAULTS[mode])}
+            onReset={() => onChangeParams(SEGMENT_DEFAULTS.idea)}
           />
         </fieldset>
       </details>

@@ -27,11 +27,14 @@ interface Props {
   currentTime: number
   selected: number | null
   onSeek: (time: number) => void
-  onSelectClip: (index: number, time: number) => void
+  /** 区間の帯をタップした（そのクリップを頭から再生する） */
+  onTapClip: (index: number) => void
+  /** 区間の帯をダブルタップした（残す／捨てるを切り替える） */
+  onDoubleTapClip: (index: number) => void
 }
 
 export function Timeline(props: Props) {
-  const { duration, filmstrip, clips, keyframes, currentTime, selected, onSeek, onSelectClip } = props
+  const { duration, filmstrip, clips, keyframes, currentTime, selected, onSeek, onTapClip, onDoubleTapClip } = props
   const scrollRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [viewWidth, setViewWidth] = useState(0)
@@ -175,12 +178,20 @@ export function Timeline(props: Props) {
     onSeek(xToTime(e.clientX - rect.left + el.scrollLeft, pxPerSec, duration))
   }
 
-  const clipClick = (i: number) => (e: React.MouseEvent) => {
+  // 1回目のタップで頭から再生し、続けて同じ帯をタップしたらダブルタップとして残す／捨てるを切り替える。
+  // （ダブルタップを待ってから再生すると反応が遅れるので、1回目はすぐ再生する）
+  const lastTapRef = useRef<{ key: string; at: number } | null>(null)
+  const clipClick = (i: number, key: string) => (e: React.MouseEvent) => {
     e.stopPropagation()
-    const el = scrollRef.current
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    onSelectClip(i, xToTime(e.clientX - rect.left + el.scrollLeft, pxPerSec, duration))
+    const now = e.timeStamp
+    const last = lastTapRef.current
+    if (last && last.key === key && now - last.at <= TIMELINE.doubleTapMs) {
+      lastTapRef.current = null
+      onDoubleTapClip(i)
+      return
+    }
+    lastTapRef.current = { key, at: now }
+    onTapClip(i)
   }
 
   // 縮小していてコマが細くなりすぎるときは、間引いて1枚を本来の幅で並べる
@@ -256,16 +267,17 @@ export function Timeline(props: Props) {
           />
           <div className="clip-track" style={{ top: trackTop, height: TIMELINE.clipTrackHeight }}>
             {clips.map((c, i) => {
+              const key = `${c.start}-${c.end}`
               const left = timeToX(c.start, pxPerSec)
               const width = Math.max(2, timeToX(c.end - c.start, pxPerSec))
               return (
                 <button
                   type="button"
-                  key={`${c.start}-${c.end}`}
+                  key={key}
                   className={`clip-band${c.keep ? ' keep' : ''}${selected === i ? ' selected' : ''}`}
                   style={{ left, width }}
-                  onClick={clipClick(i)}
-                  aria-label={`クリップ${i + 1}（${formatDuration(c.start)}〜${formatDuration(c.end)}）`}
+                  onClick={clipClick(i, key)}
+                  aria-label={`クリップ${i + 1}（${formatDuration(c.start)}〜${formatDuration(c.end)}・${c.keep ? '残す' : '捨てる'}）`}
                 >
                   {width > 20 ? i + 1 : ''}
                 </button>

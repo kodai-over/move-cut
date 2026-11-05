@@ -163,6 +163,8 @@ export const EXPORT = {
    * 超える場合は何回かに分けて書き出し・保存する。1本でこれを超えるクリップは単独で渡す
    */
   maxBatchBytes: 400 * 1024 * 1024,
+  /** 選び直しが止まってから、裏でクリップの書き出しを始めるまでの待ち時間（ミリ秒） */
+  prepareDelayMs: 800,
 } as const
 
 /** タイムライン編集画面（フェーズ5〜） */
@@ -175,8 +177,10 @@ export const TIMELINE = {
   filmstripQuality: 0.6,
   /** 波形の高さ（px） */
   waveformHeight: 56,
-  /** 区間の帯の高さ（px） */
-  clipTrackHeight: 28,
+  /** 区間の帯の高さ（px）。タップ・ダブルタップしやすい高さにする */
+  clipTrackHeight: 36,
+  /** 区間の帯をダブルタップとみなす、2回のタップの間隔の上限（ミリ秒） */
+  doubleTapMs: 350,
   /** 最大の拡大率（1秒あたりのpx） */
   maxPxPerSec: 240,
   /** 拡大・縮小ボタン1回の倍率 */
