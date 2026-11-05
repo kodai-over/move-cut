@@ -3,6 +3,8 @@ import { SLIDER, type SegmentParams } from '../config'
 
 interface Props {
   params: SegmentParams
+  /** 通し練習モードでは区切り静止秒数を使わない（最初〜最後を1区間にするため）ので表示しない */
+  showStillSec: boolean
   onChange: (params: SegmentParams) => void
   onReset: () => void
 }
@@ -37,7 +39,7 @@ function Slider({ label, value, range, format, onChange }: SliderProps) {
 const score = (v: number) => v.toFixed(3)
 const sec = (v: number) => `${v.toFixed(1)}秒`
 
-export function ParamSliders({ params, onChange, onReset }: Props) {
+export function ParamSliders({ params, showStillSec, onChange, onReset }: Props) {
   const set = (patch: Partial<SegmentParams>) => onChange({ ...params, ...patch })
   return (
     <fieldset className="sliders">
@@ -57,13 +59,15 @@ export function ParamSliders({ params, onChange, onReset }: Props) {
         format={score}
         onChange={(v) => set({ endThreshold: Math.min(v, params.startThreshold) })}
       />
-      <Slider
-        label="区切り静止秒数"
-        value={params.stillSec}
-        range={SLIDER.stillSec}
-        format={sec}
-        onChange={(v) => set({ stillSec: v })}
-      />
+      {showStillSec && (
+        <Slider
+          label="区切り静止秒数"
+          value={params.stillSec}
+          range={SLIDER.stillSec}
+          format={sec}
+          onChange={(v) => set({ stillSec: v })}
+        />
+      )}
       <Slider
         label="前の余白"
         value={params.marginBeforeSec}

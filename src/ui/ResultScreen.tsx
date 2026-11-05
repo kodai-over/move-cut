@@ -115,7 +115,12 @@ export function ResultScreen({ video, mode, samples, duration, onBack }: Props) 
         <ExportCheck key={`${clips[0].start}-${clips[0].end}`} source={video.file} clip={clips[0]} index={1} />
       )}
 
-      <ParamSliders params={params} onChange={setParams} onReset={() => setParams(SEGMENT_DEFAULTS[mode])} />
+      <ParamSliders
+        params={params}
+        showStillSec={mode === 'idea'}
+        onChange={setParams}
+        onReset={() => setParams(SEGMENT_DEFAULTS[mode])}
+      />
 
       <div className="actions">
         <button className="button secondary" onClick={exportCsv} disabled={samples.length === 0}>

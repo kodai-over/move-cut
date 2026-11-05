@@ -1,5 +1,5 @@
 // 区間の切り出し（ステップ2）。動きスコアの時系列から、動いている区間とフリーズを求める
-import { SEGMENT, type SegmentParams } from '../config'
+import { ANALYSIS, SEGMENT, type SegmentParams } from '../config'
 import type { Mode, MotionSample } from './types'
 
 /** 時間区間（秒） */
@@ -34,6 +34,11 @@ export function excludedIntervals(samples: MotionSample[]): Interval[] {
 /** サンプル間隔（秒）。2点未満なら0 */
 function sampleInterval(samples: MotionSample[]): number {
   return samples.length >= 2 ? samples[1].time - samples[0].time : 0
+}
+
+/** サンプル1つが表す秒数（2点未満なら解析のサンプリング間隔） */
+function sampleDuration(samples: MotionSample[]): number {
+  return sampleInterval(samples) || 1 / ANALYSIS.sampleFps
 }
 
 /** endIndex の直前 lookbackSec 秒（endIndex 自身は含まない）のスコアの最大値 */
@@ -176,7 +181,7 @@ export function hasSkeletonEvidence(
   fp: Pick<FreezeParams, 'minSkeletonEvidenceSec'> = SEGMENT,
 ): boolean {
   if (!samples.some((s) => s.source === 'skeleton')) return true
-  const dt = sampleInterval(samples)
+  const dt = sampleDuration(samples)
   const frames = samples.filter(
     (s) =>
       s.time >= interval.start - 1e-9 &&
@@ -198,7 +203,11 @@ export function segmentMotion(
   // 通し練習モードは最初〜最後を1区間にするだけなので、移動と踊りを分けて判定できるよう短い静止でも区切る
   const detectParams = mode === 'run' ? { ...params, stillSec: Math.min(params.stillSec, fp.runSplitStillSec) } : params
   const detected = detectMotion(samples, detectParams, fp)
-  const motions = detected.motions.filter((m) => hasSkeletonEvidence(samples, m, params.startThreshold, fp))
+  // 骨格を一度も検出できなかった動画は差分スコアだけで判定する（判定を省く）
+  const anySkeleton = samples.some((s) => s.source === 'skeleton')
+  const motions = anySkeleton
+    ? detected.motions.filter((m) => hasSkeletonEvidence(samples, m, params.startThreshold, fp))
+    : detected.motions
   const clips = buildClips(motions, duration, params, mode)
   const freezes = detected.freezes
   // 捨てた区間のフリーズは表示しない
