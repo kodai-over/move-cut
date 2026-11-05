@@ -1,15 +1,14 @@
-// 解析結果画面：プレビュー動画、動きスコアのグラフと切り出し区間、パラメータ調整、CSV書き出し
+// 解析結果画面：プレビュー動画、動きスコアのグラフと切り出し区間、パラメータ調整、CSV書き出し。区間が決まったらクリップ一覧へ
 import { useMemo, useRef, useState } from 'react'
 import type { Mode, MotionSample } from '../analysis/types'
 import { toCsv } from '../analysis/motion'
-import { excludedIntervals, segmentMotion } from '../analysis/segment'
+import { excludedIntervals, segmentMotion, type Interval } from '../analysis/segment'
 import { SEGMENT_DEFAULTS, type SegmentParams } from '../config'
 import type { SelectedVideo } from '../App'
 import { baseName, downloadText } from './browser'
 import { MotionChart } from './MotionChart'
 import { MODE_LABEL, formatDuration } from './labels'
 import { ParamSliders } from './ParamSliders'
-import { ExportCheck } from './ExportCheck'
 
 interface Props {
   video: SelectedVideo
@@ -17,15 +16,17 @@ interface Props {
   samples: MotionSample[]
   /** 動画の長さ（秒）。区間の末尾をこの範囲に収める */
   duration: number
+  params: SegmentParams
+  onChangeParams: (params: SegmentParams) => void
+  onShowClips: (clips: Interval[]) => void
   onBack: () => void
 }
 
-export function ResultScreen({ video, mode, samples, duration, onBack }: Props) {
+export function ResultScreen({ video, mode, samples, duration, params, onChangeParams, onShowClips, onBack }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [currentTime, setCurrentTime] = useState(0)
   /** 最後にタップされた時刻（初回の再生準備中に続けてタップされた場合も最新を使う） */
   const pendingSeekRef = useRef(0)
-  const [params, setParams] = useState<SegmentParams>(SEGMENT_DEFAULTS[mode])
   // 解析はやり直さず、区間の計算だけをやり直す
   const { clips, freezes } = useMemo(() => segmentMotion(samples, duration, params, mode), [samples, duration, params, mode])
   const excluded = useMemo(() => excludedIntervals(samples), [samples])
@@ -110,16 +111,15 @@ export function ResultScreen({ video, mode, samples, duration, onBack }: Props) 
         </ol>
       )}
 
-      {clips.length > 0 && (
-        // 区間が変わったら書き出し済みのファイルを捨てる（古い区間を保存しないため）
-        <ExportCheck key={`${clips[0].start}-${clips[0].end}`} source={video.file} clip={clips[0]} index={1} />
-      )}
+      <button className="button primary" onClick={() => onShowClips(clips)} disabled={clips.length === 0}>
+        クリップ一覧へ（{clips.length}本）
+      </button>
 
       <ParamSliders
         params={params}
         showStillSec={mode === 'idea'}
-        onChange={setParams}
-        onReset={() => setParams(SEGMENT_DEFAULTS[mode])}
+        onChange={onChangeParams}
+        onReset={() => onChangeParams(SEGMENT_DEFAULTS[mode])}
       />
 
       <div className="actions">
