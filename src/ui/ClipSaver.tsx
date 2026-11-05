@@ -2,7 +2,7 @@
 // 共有シートはタップ直後にしか開けないため、選んだクリップを裏で先に書き出しておき、
 // 「写真に保存」のタップで書き出し済みのファイルをすぐ共有シートに渡す（1タップで保存できるように）。
 // メモリ上限に備えて推定サイズで何回かに分け、回ごとに書き出し済みにして保存する
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { EXPORT } from '../config'
 import { planBatches, type NumberedClip } from '../export/batch'
 import { UserFacingError } from '../video/videoFile'
@@ -17,6 +17,8 @@ interface Props {
   /** 保存するクリップ（number は区間の連番。ファイル名に使う） */
   chosen: NumberedClip[]
   exporter: ExporterQueue
+  /** 書き出し済みのファイル。親が持ち、この画面を離れて戻っても使い回す（いま保存する回のものだけを残す） */
+  cacheRef: RefObject<ReadonlyMap<string, File>>
   /** 保存（共有シート）の途中か（途中は選択などを変えさせない） */
   onBusyChange: (busy: boolean) => void
 }
@@ -26,7 +28,7 @@ const fileKey = (c: NumberedClip) => `${c.number}:${c.clip.start}-${c.clip.end}`
 
 type Status = { kind: 'saved'; count: number; all: boolean } | { kind: 'cancelled' } | { kind: 'error'; message: string }
 
-export function ClipSaver({ video, duration, chosen, exporter, onBusyChange }: Props) {
+export function ClipSaver({ video, duration, chosen, exporter, cacheRef, onBusyChange }: Props) {
   const batches = useMemo(
     () => planBatches(chosen, video.file.size, duration, EXPORT.maxBatchBytes),
     [chosen, video.file.size, duration],
@@ -46,8 +48,8 @@ export function ClipSaver({ video, duration, chosen, exporter, onBusyChange }: P
   const [busy, setBusy] = useState(false)
 
   /** 書き出し済みのファイル（いま保存する回のものだけを持つ）。裏の書き出し処理からは ref で最新を読む */
-  const [prepared, setPrepared] = useState<ReadonlyMap<string, File>>(new Map())
-  const preparedRef = useRef<ReadonlyMap<string, File>>(prepared)
+  const [prepared, setPrepared] = useState<ReadonlyMap<string, File>>(() => cacheRef.current)
+  const preparedRef = cacheRef
   const wantedRef = useRef<ReadonlySet<string>>(new Set())
   /** 要らなくなったファイルを手放して（メモリを空ける）、必要なら1つ加える */
   const updatePrepared = (add?: [string, File]) => {

@@ -187,6 +187,8 @@ export const TIMELINE = {
   keyframeTickMinPxPerSec: 20,
   /** 端をドラッグして縮めるときの、クリップの最短の長さ（秒） */
   minClipSec: 0.5,
+  /** 区間の帯に長さを表示する最小の幅（px）。これより細い帯には文字を出さない */
+  clipLabelMinPx: 40,
   /** 指でなぞるスクロールが止まったとみなすまでの時間（ミリ秒）。止まるまでは再生位置への自動スクロールをしない */
   scrollIdleMs: 150,
 } as const
@@ -197,4 +199,6 @@ export const PREVIEW = {
   longPressMs: 350,
   /** 長押し中の再生速度 */
   fastRate: 2,
+  /** 再生ボタンで、末尾からこの秒数以内にいるときは先頭から再生し直す */
+  restartNearEndSec: 0.05,
 } as const

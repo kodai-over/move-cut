@@ -25,9 +25,7 @@ interface Props {
   keyframes: number[] | null
   currentTime: number
   selectedId: number | null
-  /** 指でタイムラインに触れた（再生を止める） */
-  onTouchStart: () => void
-  /** なぞってスクロールした（その時刻へシークする） */
+  /** なぞってスクロールした（その時刻へシークする。再生中なら止める） */
   onScrub: (time: number) => void
   /** 区間の帯をタップした（そのクリップを頭から再生する） */
   onTapClip: (id: number) => void
@@ -230,7 +228,6 @@ export function Timeline(props: Props) {
     interactingRef.current = true
     touchingRef.current = true
     window.clearTimeout(scrollIdleRef.current)
-    props.onTouchStart()
   }
   const onTouchEnd = (e: React.TouchEvent) => {
     if (e.touches.length > 0) return
@@ -313,8 +310,7 @@ export function Timeline(props: Props) {
             className="clip-track"
             style={{ top: TRACK_TOP, left: pad, width: trackWidth, height: TIMELINE.clipTrackHeight }}
           >
-            {showKeyframes &&
-              keyframes.map((k) => <span key={k} className="keyframe-tick" style={{ left: timeToX(k, pxPerSec) }} />)}
+            {showKeyframes && <KeyframeTicks keyframes={keyframes} pxPerSec={pxPerSec} />}
             {clips.map((c, i) => {
               const left = timeToX(c.start, pxPerSec)
               const width = Math.max(2, timeToX(c.end - c.start, pxPerSec))
@@ -332,7 +328,7 @@ export function Timeline(props: Props) {
                     title="タップで再生、ダブルタップで残す／捨てる"
                     aria-label={`クリップ${i + 1}（${formatDuration(c.start)}〜${formatDuration(c.end)}・${c.keep ? '残す' : '捨てる'}）`}
                   >
-                    {width > 40 && formatDuration(c.end - c.start)}
+                    {width > TIMELINE.clipLabelMinPx && formatDuration(c.end - c.start)}
                   </button>
                   {selected &&
                     (['start', 'end'] as const).map((edge) => (
@@ -357,6 +353,11 @@ export function Timeline(props: Props) {
     </div>
   )
 }
+
+/** キーフレームの目盛り。再生中は親が毎フレーム更新されるので、拡大率が変わったときだけ作り直す */
+const KeyframeTicks = memo(function KeyframeTicks({ keyframes, pxPerSec }: { keyframes: number[]; pxPerSec: number }) {
+  return keyframes.map((k) => <span key={k} className="keyframe-tick" style={{ left: timeToX(k, pxPerSec) }} />)
+})
 
 interface FilmstripProps {
   filmstrip: FilmstripFrame[]

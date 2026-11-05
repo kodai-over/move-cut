@@ -19,18 +19,22 @@ interface Props {
 
 export function Preview({ videoRef, src, currentTime, duration, playing, onTogglePlay, onPlayingChange, onLoaded, children }: Props) {
   const [fast, setFast] = useState(false)
-  const pressRef = useRef<{ timer: number; long: boolean; wasPlaying: boolean } | null>(null)
+  const pressRef = useRef<{ timer: number; long: boolean; wasPlaying: boolean; wasMuted: boolean } | null>(null)
   const video = () => videoRef.current
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return
-    const press = { timer: 0, long: false, wasPlaying: playing }
+    const press = { timer: 0, long: false, wasPlaying: playing, wasMuted: videoRef.current?.muted ?? false }
     press.timer = window.setTimeout(() => {
       const el = video()
       if (!el) return
       press.long = true
       el.playbackRate = PREVIEW.fastRate
-      void el.play().catch(() => {})
+      // タイマーの中の play() は操作によるものとみなされず断られることがあるので、そのときは無音で再生する
+      void el.play().catch(() => {
+        el.muted = true
+        return el.play().catch(() => {})
+      })
       setFast(true)
     }, PREVIEW.longPressMs)
     pressRef.current = press
@@ -45,6 +49,7 @@ export function Preview({ videoRef, src, currentTime, duration, playing, onToggl
       const el = video()
       if (el) {
         el.playbackRate = 1
+        el.muted = press.wasMuted
         // 止まっていたときに長押ししたなら、離したら止める（再生中なら等速で再生を続ける）
         if (!press.wasPlaying) el.pause()
       }

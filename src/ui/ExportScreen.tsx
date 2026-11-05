@@ -5,6 +5,7 @@ import type { SelectedVideo } from '../App'
 import { ClipSaver } from './ClipSaver'
 import { Icon } from './icons'
 import { formatDuration } from './labels'
+import type { RefObject } from 'react'
 import type { ExporterQueue } from './useClipExporter'
 
 interface Props {
@@ -14,6 +15,8 @@ interface Props {
   filmstrip: FilmstripFrame[]
   frameAspect: number
   exporter: ExporterQueue
+  /** 書き出し済みのファイル（画面を離れても持っておく） */
+  cacheRef: RefObject<ReadonlyMap<string, File>>
   busy: boolean
   onBusyChange: (busy: boolean) => void
   onBack: () => void
@@ -31,7 +34,7 @@ function frameAt(filmstrip: FilmstripFrame[], time: number): FilmstripFrame | un
   return best
 }
 
-export function ExportScreen({ video, duration, chosen, filmstrip, frameAspect, exporter, busy, onBusyChange, onBack }: Props) {
+export function ExportScreen({ video, duration, chosen, filmstrip, frameAspect, exporter, cacheRef, busy, onBusyChange, onBack }: Props) {
   const totalSec = chosen.reduce((s, c) => s + (c.clip.end - c.clip.start), 0)
   const totalBytes = chosen.reduce((s, c) => s + estimateClipBytes(c.clip, video.file.size, duration), 0)
 
@@ -65,6 +68,7 @@ export function ExportScreen({ video, duration, chosen, filmstrip, frameAspect, 
         duration={duration}
         chosen={chosen}
         exporter={exporter}
+        cacheRef={cacheRef}
         onBusyChange={onBusyChange}
       />
     </section>

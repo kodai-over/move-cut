@@ -6,7 +6,7 @@ import type { Interval } from '../analysis/segment'
 import type { MotionSample } from '../analysis/types'
 import { toCsv } from '../analysis/motion'
 import { excludedIntervals, segmentMotion } from '../analysis/segment'
-import { SEGMENT_DEFAULTS, TIMELINE, type SegmentParams } from '../config'
+import { PREVIEW, SEGMENT_DEFAULTS, TIMELINE, type SegmentParams } from '../config'
 import type { NumberedClip } from '../export/batch'
 import { clipsFromIntervals, trimClip, type ClipEdge, type EditClip } from '../timeline/clips'
 import type { FilmstripFrame } from '../video/analyzeVideo'
@@ -43,6 +43,10 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [keyframes, setKeyframes] = useState<number[] | null>(null)
+  /** シークのために無音で一瞬再生している間（再生中の扱いにしない） */
+  const warmingUpRef = useRef(false)
+  /** 書き出し画面で書き出したファイル（編集に戻っても、変えていないクリップは書き出し直さない） */
+  const exportCacheRef = useRef<ReadonlyMap<string, File>>(new Map())
 
   // 解析はやり直さず、区間の計算だけをやり直す
   const { clips: intervals, freezes } = useMemo(
@@ -118,12 +122,15 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
     // ユーザー操作の中で無音のまま一瞬再生して止め、描画できる状態にしてからシークする
     const wasMuted = el.muted
     el.muted = true
+    // この再生で play イベントが出ても再生中にしない（再生位置が 0 に戻って見えるため）
+    warmingUpRef.current = true
     el.play()
       .then(() => el.pause())
       .catch(() => {
         // 再生できない環境でも、シークだけは試みる
       })
       .finally(() => {
+        warmingUpRef.current = false
         el.muted = wasMuted
         el.currentTime = pendingSeekRef.current
       })
@@ -132,6 +139,16 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
   const seek = (time: number) => {
     setCurrentTime(time)
     seekVideo(time)
+  }
+
+  const setPlayingIfReal = (next: boolean) => {
+    if (!warmingUpRef.current) setPlaying(next)
+  }
+
+  /** タイムラインをなぞった：再生中なら止めてからシークする */
+  const scrub = (time: number) => {
+    if (playing) stop()
+    seek(time)
   }
 
   const stop = () => {
@@ -147,7 +164,7 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
       return
     }
     setPlayingClipId(null)
-    if (el.ended || el.currentTime >= duration - 0.05) el.currentTime = 0
+    if (el.ended || el.currentTime >= duration - PREVIEW.restartNearEndSec) el.currentTime = 0
     void el.play().catch(() => {})
   }
 
@@ -165,7 +182,6 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
   }
 
   const toggleKeep = (id: number) => {
-    if (busy) return
     setClips(clips.map((c) => (c.id === id ? { ...c, keep: !c.keep } : c)))
   }
 
@@ -202,6 +218,8 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
 
   // スライダーはAIの提案を作り直す。手で変えた内容があれば確かめてから捨てる
   const changeParams = (next: SegmentParams) => {
+    const same = (Object.keys(next) as (keyof SegmentParams)[]).every((k) => next[k] === params[k])
+    if (same) return
     if (edited?.source === intervals && !window.confirm('手で調整した内容が消えます。作り直しますか？')) return
     setEdited(null)
     setSelectedId(null)
@@ -219,6 +237,7 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
         filmstrip={filmstrip}
         frameAspect={frameAspect}
         exporter={exporter}
+        cacheRef={exportCacheRef}
         busy={busy}
         onBusyChange={setBusy}
         onBack={() => setView('edit')}
@@ -235,7 +254,7 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
         duration={duration}
         playing={playing}
         onTogglePlay={togglePlay}
-        onPlayingChange={setPlaying}
+        onPlayingChange={setPlayingIfReal}
         onLoaded={() => {
           if (currentTime > 0) seekVideo(currentTime)
         }}
@@ -275,8 +294,7 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
           keyframes={keyframes}
           currentTime={currentTime}
           selectedId={selectedId}
-          onTouchStart={stop}
-          onScrub={seek}
+          onScrub={scrub}
           onTapClip={playClip}
           onDoubleTapClip={toggleKeep}
           onTapEmpty={() => setSelectedId(null)}
