@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { buildClips, detectMotion, excludedIntervals, segmentMotion } from './segment'
+import { buildClips, detectMotion, excludedIntervals, hasSkeletonEvidence, segmentMotion } from './segment'
 import type { MotionSample } from './types'
 import type { SegmentParams } from '../config'
 
-const FP = { startHoldSec: 0.3, freezeLookbackSec: 1, freezePeakRatio: 2, freezeMinTrunkDeg: 45, freezeMinSec: 0.5, freezeMaxSec: 5 }
+const FP = { startHoldSec: 0.3, freezeLookbackSec: 1, freezePeakRatio: 2, freezeMinTrunkDeg: 45, freezeMinSec: 0.5, freezeMaxSec: 5, minSkeletonEvidenceSec: 0.3, runSplitStillSec: 2 }
 const P: SegmentParams = {
   startThreshold: 0.1,
   endThreshold: 0.06,
@@ -190,5 +190,50 @@ describe('excludedIntervals', () => {
       { start: 0, end: 0.3 },
       { start: 0.9, end: 1.0 },
     ])
+  })
+})
+
+describe('骨格で確かめた動きがない区間を捨てる', () => {
+  /** 差分スコアだけで動きと判定されるサンプルにする */
+  const asDiff = (ss: MotionSample[], from: number, to: number) =>
+    ss.forEach((x) => {
+      if (x.time >= from - 1e-9 && x.time < to - 1e-9) {
+        x.source = 'diff'
+        x.skeletonScore = null
+      }
+    })
+
+  it('差分スコアだけで動いた区間は捨て、骨格で動いた区間は残す', () => {
+    // 1〜3秒：カメラの近くを通る足（差分だけ）、6〜9秒：踊り（骨格）
+    const s = series([1, 0.02], [2, 0.2], [3, 0.02], [3, 0.2], [3, 0.02])
+    asDiff(s, 1, 3)
+    expect(segmentMotion(s, 12, P, 'idea', FP).clips).toEqual([{ start: 6, end: 9 }])
+  })
+
+  it('骨格で確かめた動きが0.3秒未満なら捨てる', () => {
+    const s = series([1, 0.02], [2, 0.2], [3, 0.02])
+    asDiff(s, 1, 3)
+    s[15].source = 'skeleton'
+    s[15].skeletonScore = 0.3
+    s[16].source = 'skeleton'
+    s[16].skeletonScore = 0.3
+    expect(hasSkeletonEvidence(s, { start: 1, end: 3 }, 0.1, FP)).toBe(false)
+    s[17].source = 'skeleton'
+    s[17].skeletonScore = 0.3
+    expect(hasSkeletonEvidence(s, { start: 1, end: 3 }, 0.1, FP)).toBe(true)
+  })
+
+  it('通し練習モードでも、移動とつながった踊りから移動を除いて最初〜最後にする', () => {
+    // 区切り静止秒数5秒だと移動（差分だけ）と踊りがつながるが、移動は捨てる
+    const s = series([1, 0.02], [2, 0.2], [3, 0.02], [3, 0.2], [3, 0.02], [2, 0.2], [3, 0.02])
+    asDiff(s, 1, 3)
+    const run = { ...P, stillSec: 5 }
+    expect(segmentMotion(s, 17, run, 'run', FP).clips).toEqual([{ start: 6, end: 14 }])
+  })
+
+  it('動画全体で骨格を一度も検出できなければ差分だけで判定する', () => {
+    const s = series([1, 0.02], [2, 0.2], [3, 0.02])
+    asDiff(s, 0, 6)
+    expect(segmentMotion(s, 6, P, 'idea', FP).clips).toEqual([{ start: 1, end: 3 }])
   })
 })
