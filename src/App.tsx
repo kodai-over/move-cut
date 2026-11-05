@@ -1,15 +1,13 @@
-// 画面遷移：動画選択 → 解析中 → 解析結果 → クリップ一覧 の一本道
+// 画面遷移：動画選択 → 解析中 → 編集 の一本道
 import { useEffect, useRef, useState } from 'react'
-import type { Mode, MotionSample } from './analysis/types'
-import type { Interval } from './analysis/segment'
+import type { Mode } from './analysis/types'
 import { SEGMENT_DEFAULTS, type SegmentParams } from './config'
-import { analyzeVideo } from './video/analyzeVideo'
+import { analyzeVideo, type AnalysisResult } from './video/analyzeVideo'
 import { UserFacingError } from './video/videoFile'
 import { keepScreenAwake } from './ui/browser'
 import { SelectScreen } from './ui/SelectScreen'
 import { AnalyzingScreen } from './ui/AnalyzingScreen'
-import { ResultScreen } from './ui/ResultScreen'
-import { ClipListScreen } from './ui/ClipListScreen'
+import { EditScreen } from './ui/EditScreen'
 import { UpdateBanner } from './ui/UpdateBanner'
 
 export interface SelectedVideo {
@@ -20,14 +18,13 @@ export interface SelectedVideo {
 type State =
   | { screen: 'select'; error?: string }
   | { screen: 'analyzing'; progress: number }
-  | { screen: 'result'; samples: MotionSample[]; duration: number }
-  | { screen: 'clips'; samples: MotionSample[]; duration: number; clips: Interval[] }
+  | ({ screen: 'edit' } & AnalysisResult)
 
 function App() {
   const [state, setState] = useState<State>({ screen: 'select' })
   const [video, setVideo] = useState<SelectedVideo | null>(null)
   const [mode, setMode] = useState<Mode>('idea')
-  // 区間のパラメータ。クリップ一覧から解析結果に戻ったときも調整を保つため、ここで持つ
+  // 区間のパラメータ。解析ごとにモードの初期値に戻す
   const [params, setParams] = useState<SegmentParams>(SEGMENT_DEFAULTS.idea)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -55,11 +52,11 @@ function App() {
     setParams(SEGMENT_DEFAULTS[mode])
     const release = await keepScreenAwake()
     try {
-      const { samples, duration } = await analyzeVideo(video.url, {
+      const result = await analyzeVideo(video.url, {
         signal: controller.signal,
         onProgress: (progress) => setState({ screen: 'analyzing', progress }),
       })
-      setState({ screen: 'result', samples, duration })
+      setState({ screen: 'edit', ...result })
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
         setState({ screen: 'select' })
@@ -93,24 +90,17 @@ function App() {
       {state.screen === 'analyzing' && (
         <AnalyzingScreen progress={state.progress} onCancel={() => abortRef.current?.abort()} />
       )}
-      {state.screen === 'result' && video && (
-        <ResultScreen
+      {state.screen === 'edit' && video && (
+        <EditScreen
           video={video}
           mode={mode}
           samples={state.samples}
           duration={state.duration}
+          filmstrip={state.filmstrip}
+          frameAspect={state.frameAspect}
           params={params}
           onChangeParams={setParams}
-          onShowClips={(clips) => setState({ screen: 'clips', samples: state.samples, duration: state.duration, clips })}
           onBack={() => setState({ screen: 'select' })}
-        />
-      )}
-      {state.screen === 'clips' && video && (
-        <ClipListScreen
-          video={video}
-          duration={state.duration}
-          clips={state.clips}
-          onBack={() => setState({ screen: 'result', samples: state.samples, duration: state.duration })}
         />
       )}
     </main>
