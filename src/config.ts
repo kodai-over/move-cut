@@ -157,3 +157,18 @@ export const SLIDER = {
   stillSec: { min: 0.5, max: 10, step: 0.5 },
   marginSec: { min: 0, max: 3, step: 0.1 },
 } as const
+
+/** 書き出し（フェーズ3） */
+export const EXPORT = {
+  /**
+   * 1回の共有シートで渡すクリップの合計サイズ（推定）の上限（バイト）。iPhoneのSafariはメモリ上限が厳しいため、
+   * 超える場合は何回かに分けて書き出し・保存する。1本でこれを超えるクリップは単独で渡す
+   */
+  maxBatchBytes: 400 * 1024 * 1024,
+  /** サムネイルの幅（px） */
+  thumbnailWidth: 160,
+  /** サムネイルに使う時刻（クリップ開始からの秒数。余白の分だけ後ろにずらす） */
+  thumbnailOffsetSec: 0.7,
+  /** サムネイルのJPEG画質（0〜1） */
+  thumbnailQuality: 0.7,
+} as const
