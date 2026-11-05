@@ -36,6 +36,9 @@ export const ASSETS = {
   mediapipeWasmDir: 'mediapipe',
 } as const
 
+/** ダウンロード用の Object URL を解放するまでの待ち時間（ミリ秒）。iOS Safari は即時解放すると保存に失敗することがある */
+export const DOWNLOAD_URL_REVOKE_DELAY_MS = 10_000
+
 /** グラフ表示 */
 export const CHART = {
   /** 体幹角度の軸の最大値（度） */
