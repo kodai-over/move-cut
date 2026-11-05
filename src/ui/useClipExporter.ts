@@ -6,7 +6,7 @@ import type { ClipExporter } from '../video/clipExporter'
 export interface ExporterQueue {
   /** ffmpeg.wasm を使う処理を順番待ちに並べて実行する */
   run<T>(task: (exporter: ClipExporter) => Promise<T>): Promise<T>
-  /** 順番待ちが空なら ffmpeg.wasm を終了してメモリを空ける（次に使うときに読み込み直す） */
+  /** 順番待ちが空になったら ffmpeg.wasm を終了してメモリを空ける（次に使うときに読み込み直す） */
   release(): void
 }
 
@@ -71,7 +71,10 @@ export function useClipExporter(file: File): ExporterQueue {
   )
 
   const release = useCallback(() => {
-    if (pendingRef.current === 0) disposeExporter()
+    // いま並んでいる処理が終わってから確かめる（その間に新しい処理が並んだら終了しない）
+    void queueRef.current.then(() => {
+      if (pendingRef.current === 0) disposeExporter()
+    })
   }, [disposeExporter])
 
   return useMemo(() => ({ run, release }), [run, release])

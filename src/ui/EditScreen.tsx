@@ -1,17 +1,21 @@
-// 編集画面：上にプレビュー、下にタイムライン（コマの帯・動きの波形・区間の帯）。
-// 区間の帯をタップで頭から再生、ダブルタップで残す／捨てるを切り替え、残すクリップをまとめて保存する。
-// スライダーはAIの提案を作り直すときに使う
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+// 編集画面：上にプレビュー、すぐ下にタイムライン（コマの帯・動きの波形・区間の帯）。
+// 区間の帯をタップで頭から再生、ダブルタップで残す／捨てる、選んだ帯の両端をドラッグして伸縮する。
+// 書き出しは別画面。スライダー（AIの提案の作り直し）は設定シートに置く
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Interval } from '../analysis/segment'
 import type { MotionSample } from '../analysis/types'
 import { toCsv } from '../analysis/motion'
 import { excludedIntervals, segmentMotion } from '../analysis/segment'
-import { SEGMENT_DEFAULTS, type SegmentParams } from '../config'
+import { SEGMENT_DEFAULTS, TIMELINE, type SegmentParams } from '../config'
 import type { NumberedClip } from '../export/batch'
+import { clipsFromIntervals, trimClip, type ClipEdge, type EditClip } from '../timeline/clips'
 import type { FilmstripFrame } from '../video/analyzeVideo'
 import type { SelectedVideo } from '../App'
 import { baseName, downloadText } from './browser'
-import { ClipSaver } from './ClipSaver'
-import { ParamSliders } from './ParamSliders'
+import { ExportScreen } from './ExportScreen'
+import { Icon } from './icons'
+import { Preview } from './Preview'
+import { SettingsSheet } from './SettingsSheet'
 import { Timeline } from './Timeline'
 import { useClipExporter } from './useClipExporter'
 
@@ -26,20 +30,17 @@ interface Props {
   onBack: () => void
 }
 
-/** 区間を見分けるキー（区間が作り直されたら別のものとして扱う） */
-const clipKey = (c: { start: number; end: number }) => `${c.start}-${c.end}`
-
 export function EditScreen({ video, samples, duration, filmstrip, frameAspect, params, onChangeParams, onBack }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [currentTime, setCurrentTime] = useState(0)
-  /** 最後にタップされた時刻（初回の再生準備中に続けてタップされた場合も最新を使う） */
+  const [playing, setPlaying] = useState(false)
+  /** 最後にシークを頼んだ時刻（初回の再生準備中に続けてシークされた場合も最新を使う） */
   const pendingSeekRef = useRef(0)
   /** クリップだけを再生中なら、そのクリップの番号（終わりで止める） */
-  const [playingClip, setPlayingClip] = useState<number | null>(null)
-  /** 選択中のクリップ（キーで持つので、区間を作り直しても別の区間を選んだままにならない） */
-  const [selectedKey, setSelectedKey] = useState<string | null>(null)
-  /** 捨てると選んだクリップ（キーで持つので、区間が作り直されると全部「残す」に戻る） */
-  const [discarded, setDiscarded] = useState<ReadonlySet<string>>(new Set())
+  const [playingClipId, setPlayingClipId] = useState<number | null>(null)
+  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [view, setView] = useState<'edit' | 'export'>('edit')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [keyframes, setKeyframes] = useState<number[] | null>(null)
 
@@ -49,20 +50,21 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
     [samples, duration, params],
   )
   const excluded = useMemo(() => excludedIntervals(samples), [samples])
-  const clips = useMemo(() => intervals.map((c) => ({ ...c, keep: !discarded.has(clipKey(c)) })), [intervals, discarded])
+  /** 手で変えたクリップ（AIの提案が作り直されたら使わない） */
+  const [edited, setEdited] = useState<{ source: Interval[]; clips: EditClip[] } | null>(null)
+  const suggested = useMemo(() => clipsFromIntervals(intervals), [intervals])
+  const clips = edited?.source === intervals ? edited.clips : suggested
+  const setClips = (next: EditClip[]) => setEdited({ source: intervals, clips: next })
+
   const chosen: NumberedClip[] = useMemo(
     () => clips.flatMap((c, i) => (c.keep ? [{ number: i + 1, clip: c }] : [])),
     [clips],
   )
-  const selectedIndex = selectedKey === null ? -1 : clips.findIndex((c) => clipKey(c) === selectedKey)
-  const selected = selectedIndex >= 0 ? selectedIndex : null
-  const select = (i: number) => setSelectedKey(clipKey(intervals[i]))
 
   // ffmpeg.wasm は1つだけ使い回し、キーフレームの読み取りと書き出しを順番に実行する
   const exporter = useClipExporter(video.file)
 
-  // キーフレームの時刻を読む（開始位置の吸着用。フェーズ6で使う。ここでは目盛りとして表示する）。
-  // 失敗したら、保存（共有シート）の後にもう一度試す
+  // キーフレームの時刻を読む（開始のつまみの吸着用）。失敗したら、保存（共有シート）の後にもう一度試す
   const hasKeyframes = keyframes !== null
   useEffect(() => {
     if (hasKeyframes || busy) return
@@ -71,7 +73,7 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
       .run((ex) => ex.keyframeTimes())
       .then((times) => !cancelled && setKeyframes(times))
       .catch((e) => {
-        // 読めなくても編集・保存はできるので、目盛りを出さないだけにする
+        // 読めなくても編集・保存はできるので、吸着させないだけにする
         if (!cancelled) console.warn('キーフレームを読めませんでした', e)
       })
     return () => {
@@ -79,36 +81,41 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
     }
   }, [exporter, hasKeyframes, busy])
 
-  // クリップだけを再生しているときは、終わりで止める（timeupdate は間隔が粗いので毎フレーム確かめる）
+  // 再生中は毎フレーム再生位置を読む（タイムラインを滑らかに流すため。timeupdate は間隔が粗い）。
+  // クリップだけを再生しているときは、終わりで止める
+  const playingClip = playingClipId === null ? null : (clips.find((c) => c.id === playingClipId) ?? null)
+  const playingClipEnd = playingClip?.end ?? null
   useEffect(() => {
-    if (playingClip === null) return
-    const el = videoRef.current
-    const clip = intervals[playingClip]
-    if (!el || !clip) return
-    const frame = { id: 0 }
-    const check = () => {
-      if (el.currentTime >= clip.end) {
-        el.pause()
-        setPlayingClip(null)
-        return
-      }
-      frame.id = requestAnimationFrame(check)
-    }
-    frame.id = requestAnimationFrame(check)
-    return () => cancelAnimationFrame(frame.id)
-  }, [playingClip, intervals])
-
-  const seek = (time: number) => {
+    if (!playing) return
     const el = videoRef.current
     if (!el) return
-    setCurrentTime(time)
+    const frame = { id: 0 }
+    const tick = () => {
+      if (playingClipEnd !== null && el.currentTime >= playingClipEnd) {
+        el.pause()
+        el.currentTime = playingClipEnd
+        setCurrentTime(playingClipEnd)
+        setPlayingClipId(null)
+        return
+      }
+      setCurrentTime(el.currentTime)
+      frame.id = requestAnimationFrame(tick)
+    }
+    frame.id = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame.id)
+  }, [playing, playingClipEnd])
+
+  /** 動画だけをシークする（再生位置の状態は変えない） */
+  const seekVideo = (time: number) => {
+    const el = videoRef.current
+    if (!el) return
     pendingSeekRef.current = time
     if (el.played.length > 0 || !el.paused) {
       el.currentTime = time
       return
     }
     // iOS Safari は一度も再生していない動画だと、シークしても表示中のコマが更新されない。
-    // タップ（ユーザー操作）の中で無音のまま一瞬再生して止め、描画できる状態にしてからシークする
+    // ユーザー操作の中で無音のまま一瞬再生して止め、描画できる状態にしてからシークする
     const wasMuted = el.muted
     el.muted = true
     el.play()
@@ -122,54 +129,135 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
       })
   }
 
-  const playClip = (i: number) => {
+  const seek = (time: number) => {
+    setCurrentTime(time)
+    seekVideo(time)
+  }
+
+  const stop = () => {
+    videoRef.current?.pause()
+    setPlayingClipId(null)
+  }
+
+  const togglePlay = () => {
     const el = videoRef.current
     if (!el) return
-    select(i)
-    el.currentTime = intervals[i].start
-    setCurrentTime(intervals[i].start)
-    setPlayingClip(i)
+    if (!el.paused) {
+      stop()
+      return
+    }
+    setPlayingClipId(null)
+    if (el.ended || el.currentTime >= duration - 0.05) el.currentTime = 0
+    void el.play().catch(() => {})
+  }
+
+  const playClip = (id: number) => {
+    const el = videoRef.current
+    const clip = clips.find((c) => c.id === id)
+    if (!el || !clip) return
+    setSelectedId(id)
+    el.currentTime = clip.start
+    setCurrentTime(clip.start)
+    setPlayingClipId(id)
     void el.play().catch(() => {
       // 再生できなくても、シーク位置の表示は試みる
     })
   }
 
-  const toggleKeep = (i: number) => {
+  const toggleKeep = (id: number) => {
     if (busy) return
-    const key = clipKey(intervals[i])
-    setDiscarded((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
+    setClips(clips.map((c) => (c.id === id ? { ...c, keep: !c.keep } : c)))
   }
 
-  const setAll = (keep: boolean) => setDiscarded(keep ? new Set() : new Set(intervals.map(clipKey)))
+  const setAll = (keep: boolean) => setClips(clips.map((c) => ({ ...c, keep })))
 
-  const stopPreview = useCallback(() => {
-    videoRef.current?.pause()
-    setPlayingClip(null)
-  }, [])
+  // つまみのドラッグ。動かし始めたときのクリップを元に毎回計算する（縮め戻せば合体も元に戻る）
+  const trimRef = useRef<{ snapshot: EditClip[]; id: number; edge: ClipEdge; time: number } | null>(null)
+  const trimStart = (id: number, edge: ClipEdge) => {
+    stop()
+    const clip = clips.find((c) => c.id === id)
+    if (!clip) return
+    trimRef.current = { snapshot: clips, id, edge, time: edge === 'start' ? clip.start : clip.end }
+  }
+  const trim = (time: number) => {
+    const t = trimRef.current
+    if (!t) return
+    const next = trimClip(t.snapshot, t.id, t.edge, time, { duration, minSec: TIMELINE.minClipSec, keyframes })
+    const moved = next.find((c) => c.id === t.id)
+    if (!moved) return
+    setClips(next)
+    // 動かしている端のコマをプレビューに出す（タイムラインは動かさない）
+    const edgeTime = t.edge === 'start' ? moved.start : moved.end
+    if (edgeTime !== t.time) {
+      t.time = edgeTime
+      seekVideo(edgeTime)
+    }
+  }
+  const trimEnd = () => {
+    const t = trimRef.current
+    trimRef.current = null
+    // 離したら、動かした端に再生位置を合わせる
+    if (t) setCurrentTime(t.time)
+  }
+
+  // スライダーはAIの提案を作り直す。手で変えた内容があれば確かめてから捨てる
+  const changeParams = (next: SegmentParams) => {
+    if (edited?.source === intervals && !window.confirm('手で調整した内容が消えます。作り直しますか？')) return
+    setEdited(null)
+    setSelectedId(null)
+    onChangeParams(next)
+  }
 
   const exportCsv = () => downloadText(toCsv(samples), `${baseName(video.file.name)}_motion.csv`, 'text/csv')
-  const skeletonRatio = samples.length ? samples.filter((s) => s.source === 'skeleton').length / samples.length : 0
+
+  if (view === 'export') {
+    return (
+      <ExportScreen
+        video={video}
+        duration={duration}
+        chosen={chosen}
+        filmstrip={filmstrip}
+        frameAspect={frameAspect}
+        exporter={exporter}
+        busy={busy}
+        onBusyChange={setBusy}
+        onBack={() => setView('edit')}
+      />
+    )
+  }
 
   return (
-    <section className="screen edit">
-      <video
-        ref={videoRef}
-        className="preview"
+    <section className="editor">
+      <Preview
+        videoRef={videoRef}
         src={video.url}
-        controls
-        playsInline
-        preload="auto"
-        onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-        onPause={() => setPlayingClip(null)}
-      />
-      <p className="meta">
-        {video.file.name} ・ 骨格で判定 {Math.round(skeletonRatio * 100)}%
-      </p>
+        currentTime={currentTime}
+        duration={duration}
+        playing={playing}
+        onTogglePlay={togglePlay}
+        onPlayingChange={setPlaying}
+        onLoaded={() => {
+          if (currentTime > 0) seekVideo(currentTime)
+        }}
+      >
+        <div className="bar overlay">
+          <button type="button" className="icon-button" onClick={() => setSettingsOpen(true)} aria-label="設定" title="設定">
+            <Icon name="sliders" />
+          </button>
+          <button
+            type="button"
+            className="pill"
+            onClick={() => {
+              stop()
+              setView('export')
+            }}
+            disabled={chosen.length === 0}
+            title={chosen.length === 0 ? '残すクリップがありません' : `残す${chosen.length}本を書き出す`}
+          >
+            書き出す
+          </button>
+        </div>
+      </Preview>
 
       {samples.length === 0 ? (
         <p className="message error">解析結果が空です。別の動画でお試しください。</p>
@@ -186,56 +274,29 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
           endThreshold={params.endThreshold}
           keyframes={keyframes}
           currentTime={currentTime}
-          selected={selected}
-          onSeek={seek}
+          selectedId={selectedId}
+          onTouchStart={stop}
+          onScrub={seek}
           onTapClip={playClip}
           onDoubleTapClip={toggleKeep}
+          onTapEmpty={() => setSelectedId(null)}
+          onTrimStart={trimStart}
+          onTrim={trim}
+          onTrimEnd={trimEnd}
         />
       )}
-      <p className="hint">
-        区間の帯をタップでそのクリップを頭から再生、ダブルタップで残す（青）／捨てる（点線）を切り替えます。オレンジはフリーズ、灰色は動きとして数えなかった時間。実線が開始閾値、破線が終了閾値です。
-      </p>
 
-      <div className="select-all">
-        <span className="summary">
-          {playingClip !== null ? `クリップ${playingClip + 1}を再生中` : `クリップ ${clips.length}本`}
-        </span>
-        <button type="button" className="button ghost" onClick={() => setAll(true)} disabled={busy}>
-          すべて残す
-        </button>
-        <button type="button" className="button ghost" onClick={() => setAll(false)} disabled={busy}>
-          すべて捨てる
-        </button>
-      </div>
-      <ClipSaver
-        video={video}
-        duration={duration}
-        chosen={chosen}
-        exporter={exporter}
-        onBusyChange={setBusy}
-        onBeforeStart={stopPreview}
-      />
-
-      <details className="suggest-settings">
-        <summary>AIの提案を調整する</summary>
-        {/* 書き出し中は区間を作り直させない（保存中の内容と画面がずれないように） */}
-        <fieldset className="plain" disabled={busy}>
-          <ParamSliders
-            params={params}
-            onChange={onChangeParams}
-            onReset={() => onChangeParams(SEGMENT_DEFAULTS.idea)}
-          />
-        </fieldset>
-      </details>
-
-      <div className="actions">
-        <button className="button secondary" onClick={exportCsv} disabled={samples.length === 0}>
-          CSVを書き出す（デバッグ用）
-        </button>
-        <button className="button ghost" onClick={onBack} disabled={busy}>
-          別の動画を選ぶ
-        </button>
-      </div>
+      {settingsOpen && (
+        <SettingsSheet
+          params={params}
+          onChangeParams={changeParams}
+          onResetParams={() => changeParams(SEGMENT_DEFAULTS.idea)}
+          onSetAll={setAll}
+          onExportCsv={exportCsv}
+          onBack={onBack}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </section>
   )
 }

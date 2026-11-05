@@ -22,6 +22,8 @@ type State =
 function App() {
   const [state, setState] = useState<State>({ screen: 'select' })
   const [video, setVideo] = useState<SelectedVideo | null>(null)
+  /** 選んだばかりの動画を、読み込めしだい解析する */
+  const [autoStart, setAutoStart] = useState(false)
   // 区間のパラメータ。解析ごとに初期値に戻す
   const [params, setParams] = useState<SegmentParams>(SEGMENT_DEFAULTS.idea)
   const abortRef = useRef<AbortController | null>(null)
@@ -39,11 +41,13 @@ function App() {
 
   const selectFile = (file: File | null) => {
     setVideo(file ? { file, url: URL.createObjectURL(file) } : null)
+    setAutoStart(file !== null)
     setState({ screen: 'select' })
   }
 
   const start = async () => {
     if (!video) return
+    setAutoStart(false)
     const controller = new AbortController()
     abortRef.current = controller
     setState({ screen: 'analyzing', progress: 0 })
@@ -70,17 +74,16 @@ function App() {
   }
 
   return (
-    <main className="app">
-      <header className="app-header">
-        <h1>MoveCut</h1>
-      </header>
-      <UpdateBanner canUpdate={state.screen === 'select'} />
+    <main className={`app ${state.screen}`}>
+      {state.screen === 'select' && <UpdateBanner canUpdate />}
       {state.screen === 'select' && (
         <SelectScreen
           video={video}
           error={state.error}
+          autoStart={autoStart}
           onSelectFile={selectFile}
           onStart={start}
+          onDecline={() => setAutoStart(false)}
         />
       )}
       {state.screen === 'analyzing' && (

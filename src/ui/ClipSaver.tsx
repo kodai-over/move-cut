@@ -4,11 +4,10 @@
 // メモリ上限に備えて推定サイズで何回かに分け、回ごとに書き出し済みにして保存する
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { EXPORT } from '../config'
-import { estimateClipBytes, planBatches, type NumberedClip } from '../export/batch'
+import { planBatches, type NumberedClip } from '../export/batch'
 import { UserFacingError } from '../video/videoFile'
 import type { SelectedVideo } from '../App'
 import { keepScreenAwake, saveFiles } from './browser'
-import { formatDuration } from './labels'
 import type { ExporterQueue } from './useClipExporter'
 
 interface Props {
@@ -20,8 +19,6 @@ interface Props {
   exporter: ExporterQueue
   /** 保存（共有シート）の途中か（途中は選択などを変えさせない） */
   onBusyChange: (busy: boolean) => void
-  /** 保存を始める直前に呼ぶ（プレビューを止めるなど） */
-  onBeforeStart: () => void
 }
 
 /** 書き出したファイルを見分けるキー（連番が変わるとファイル名も変わるので含める） */
@@ -29,9 +26,7 @@ const fileKey = (c: NumberedClip) => `${c.number}:${c.clip.start}-${c.clip.end}`
 
 type Status = { kind: 'saved'; count: number; all: boolean } | { kind: 'cancelled' } | { kind: 'error'; message: string }
 
-const MB = 1024 * 1024
-
-export function ClipSaver({ video, duration, chosen, exporter, onBusyChange, onBeforeStart }: Props) {
+export function ClipSaver({ video, duration, chosen, exporter, onBusyChange }: Props) {
   const batches = useMemo(
     () => planBatches(chosen, video.file.size, duration, EXPORT.maxBatchBytes),
     [chosen, video.file.size, duration],
@@ -63,6 +58,8 @@ export function ClipSaver({ video, duration, chosen, exporter, onBusyChange, onB
   }
 
   useEffect(() => onBusyChange(busy), [busy, onBusyChange])
+  // 書き出し画面を離れたら、書き出しの途中のものが終わりしだい ffmpeg.wasm を終了してメモリを空ける
+  useEffect(() => () => exporter.release(), [exporter])
 
   // いま保存する回のクリップを裏で書き出しておく。選び直しが続くあいだは待ち、落ち着いてから始める
   useEffect(() => {
@@ -113,8 +110,6 @@ export function ClipSaver({ video, duration, chosen, exporter, onBusyChange, onB
   const preparedCount = target.filter((c) => prepared.has(fileKey(c))).length
   const ready = target.length > 0 && preparedCount === target.length
 
-  const chosenSec = chosen.reduce((s, c) => s + (c.clip.end - c.clip.start), 0)
-  const chosenBytes = chosen.reduce((s, c) => s + estimateClipBytes(c.clip, video.file.size, duration), 0)
   const multiRound = batches.length > 1
   const roundLabel = multiRound ? `・${current.round + 1}/${batches.length}回目` : ''
 
@@ -122,7 +117,6 @@ export function ClipSaver({ video, duration, chosen, exporter, onBusyChange, onB
   const save = async () => {
     if (!ready || busy) return
     const files = target.map((c) => prepared.get(fileKey(c))!)
-    onBeforeStart()
     setBusy(true)
     try {
       const result = await saveFiles(files)
@@ -156,12 +150,6 @@ export function ClipSaver({ video, duration, chosen, exporter, onBusyChange, onB
 
   return (
     <div className="actions">
-      <p className="summary" aria-live="polite">
-        {chosen.length}本を選択（合計 {formatDuration(chosenSec)}・約{Math.round(chosenBytes / MB)}MB）
-      </p>
-      {multiRound && !current.done && (
-        <p className="hint">メモリ不足を防ぐため、{batches.length}回に分けて保存します。</p>
-      )}
       {shownStatus?.kind === 'saved' && (
         <p className="message success">
           {shownStatus.all ? `${shownStatus.count}本を保存しました。` : `${shownStatus.count}本を保存しました。続きを保存してください。`}
@@ -190,9 +178,14 @@ export function ClipSaver({ video, duration, chosen, exporter, onBusyChange, onB
           最初からもう一度保存する
         </button>
       ) : (
-        <button className="button primary" onClick={save} disabled={!ready || busy}>
+        <button
+          className="button primary"
+          onClick={save}
+          disabled={!ready || busy}
+          title={multiRound ? `メモリ不足を防ぐため、${batches.length}回に分けて保存します` : undefined}
+        >
           {chosen.length === 0
-            ? '保存するクリップを選んでください'
+            ? '残すクリップがありません'
             : ready
               ? `写真に保存（${target.length}本${roundLabel}）`
               : `保存の準備中…（${preparedCount}/${target.length}本${roundLabel}）`}
