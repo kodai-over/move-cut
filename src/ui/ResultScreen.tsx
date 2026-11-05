@@ -9,6 +9,7 @@ import { baseName, downloadText } from './browser'
 import { MotionChart } from './MotionChart'
 import { MODE_LABEL, formatDuration } from './labels'
 import { ParamSliders } from './ParamSliders'
+import { ExportCheck } from './ExportCheck'
 
 interface Props {
   video: SelectedVideo
@@ -108,6 +109,8 @@ export function ResultScreen({ video, mode, samples, duration, onBack }: Props) 
           ))}
         </ol>
       )}
+
+      {clips.length > 0 && <ExportCheck source={video.file} clip={clips[0]} index={1} />}
 
       <ParamSliders params={params} onChange={setParams} onReset={() => setParams(SEGMENT_DEFAULTS[mode])} />
 

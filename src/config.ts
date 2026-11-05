@@ -54,6 +54,8 @@ export const SUPPORT = {
 export const ASSETS = {
   poseModelPath: 'models/pose_landmarker_lite.task',
   mediapipeWasmDir: 'mediapipe',
+  ffmpegCoreJs: 'ffmpeg/ffmpeg-core.js',
+  ffmpegCoreWasm: 'ffmpeg/ffmpeg-core.wasm',
 } as const
 
 /** ダウンロード用の Object URL を解放するまでの待ち時間（ミリ秒）。iOS Safari は即時解放すると保存に失敗することがある */

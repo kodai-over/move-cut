@@ -292,3 +292,9 @@ progress {
   min-height: 32px;
   accent-color: var(--accent);
 }
+
+.export-check {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
