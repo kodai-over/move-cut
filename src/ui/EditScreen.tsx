@@ -6,6 +6,7 @@ import { toCsv } from '../analysis/motion'
 import { excludedIntervals, segmentMotion } from '../analysis/segment'
 import { SEGMENT_DEFAULTS, type SegmentParams } from '../config'
 import type { NumberedClip } from '../export/batch'
+import type { ClipExporter } from '../video/clipExporter'
 import type { FilmstripFrame } from '../video/analyzeVideo'
 import type { SelectedVideo } from '../App'
 import { baseName, downloadText } from './browser'
@@ -36,7 +37,8 @@ export function EditScreen({ video, mode, samples, duration, filmstrip, frameAsp
   const pendingSeekRef = useRef(0)
   /** クリップだけを再生中なら、そのクリップの番号（終わりで止める） */
   const [playingClip, setPlayingClip] = useState<number | null>(null)
-  const [selected, setSelected] = useState<number | null>(null)
+  /** 選択中のクリップ（キーで持つので、区間を作り直しても別の区間を選んだままにならない） */
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
   /** 捨てると選んだクリップ（キーで持つので、区間が作り直されると全部「残す」に戻る） */
   const [discarded, setDiscarded] = useState<ReadonlySet<string>>(new Set())
   const [busy, setBusy] = useState(false)
@@ -50,29 +52,39 @@ export function EditScreen({ video, mode, samples, duration, filmstrip, frameAsp
   const excluded = useMemo(() => excludedIntervals(samples), [samples])
   const clips = useMemo(() => intervals.map((c) => ({ ...c, keep: !discarded.has(clipKey(c)) })), [intervals, discarded])
   const chosen: NumberedClip[] = clips.flatMap((c, i) => (c.keep ? [{ number: i + 1, clip: c }] : []))
+  const selectedIndex = selectedKey === null ? -1 : clips.findIndex((c) => clipKey(c) === selectedKey)
+  const selected = selectedIndex >= 0 ? selectedIndex : null
+  const select = (i: number) => setSelectedKey(clipKey(intervals[i]))
 
-  // キーフレームの時刻を読む（開始位置の吸着用。フェーズ6で使う。ここでは目盛りとして表示する）
+  // キーフレームの時刻を読む（開始位置の吸着用。フェーズ6で使う。ここでは目盛りとして表示する）。
+  // 書き出し中は ffmpeg.wasm が2つ同時に動いてメモリを圧迫しないよう読むのをやめ、終わってから読み直す
+  const hasKeyframes = keyframes !== null
   useEffect(() => {
+    if (busy || hasKeyframes) return
     let cancelled = false
+    const holder: { exporter: ClipExporter | null } = { exporter: null }
     void (async () => {
       try {
         const { createClipExporter } = await import('../video/clipExporter')
-        const exporter = await createClipExporter(video.file)
-        try {
-          const times = await exporter.keyframeTimes()
-          if (!cancelled) setKeyframes(times)
-        } finally {
-          await exporter.dispose()
-        }
+        if (cancelled) return
+        holder.exporter = await createClipExporter(video.file)
+        if (cancelled) return
+        const times = await holder.exporter.keyframeTimes()
+        if (!cancelled) setKeyframes(times)
       } catch (e) {
         // 読めなくても編集・保存はできるので、目盛りを出さないだけにする
-        console.warn('キーフレームを読めませんでした', e)
+        if (!cancelled) console.warn('キーフレームを読めませんでした', e)
+      } finally {
+        void holder.exporter?.dispose()
+        holder.exporter = null
       }
     })()
     return () => {
       cancelled = true
+      void holder.exporter?.dispose()
+      holder.exporter = null
     }
-  }, [video.file])
+  }, [video.file, busy, hasKeyframes])
 
   // クリップだけを再生しているときは、終わりで止める（timeupdate は間隔が粗いので毎フレーム確かめる）
   useEffect(() => {
@@ -120,7 +132,7 @@ export function EditScreen({ video, mode, samples, duration, filmstrip, frameAsp
   const playClip = (i: number) => {
     const el = videoRef.current
     if (!el) return
-    setSelected(i)
+    select(i)
     el.currentTime = intervals[i].start
     setCurrentTime(intervals[i].start)
     setPlayingClip(i)
@@ -183,7 +195,7 @@ export function EditScreen({ video, mode, samples, duration, filmstrip, frameAsp
           selected={selected}
           onSeek={seek}
           onSelectClip={(i, time) => {
-            setSelected(i)
+            select(i)
             seek(time)
           }}
         />
@@ -222,12 +234,15 @@ export function EditScreen({ video, mode, samples, duration, filmstrip, frameAsp
 
       <details className="suggest-settings">
         <summary>AIの提案を調整する</summary>
-        <ParamSliders
-          params={params}
-          showStillSec={mode === 'idea'}
-          onChange={onChangeParams}
-          onReset={() => onChangeParams(SEGMENT_DEFAULTS[mode])}
-        />
+        {/* 書き出し中は区間を作り直させない（保存中の内容と画面がずれないように） */}
+        <fieldset className="plain" disabled={busy}>
+          <ParamSliders
+            params={params}
+            showStillSec={mode === 'idea'}
+            onChange={onChangeParams}
+            onReset={() => onChangeParams(SEGMENT_DEFAULTS[mode])}
+          />
+        </fieldset>
       </details>
 
       <div className="actions">

@@ -1,5 +1,5 @@
 // タイムライン：コマの帯・動きの波形・区間の帯を同じ時間軸で重ねる。横スクロールと拡大・縮小、タップでシーク
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Interval } from '../analysis/segment'
 import type { MotionSample } from '../analysis/types'
 import { CHART, TIMELINE } from '../config'
@@ -35,7 +35,9 @@ export function Timeline(props: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [viewWidth, setViewWidth] = useState(0)
-  const [scrollLeft, setScrollLeft] = useState(0)
+  /** スクロール量。スクロールのたびに再描画（React の更新）しないよう ref で持ち、波形だけを描き直す */
+  const scrollLeftRef = useRef(0)
+  const drawFrameRef = useRef(0)
   /** 拡大率（1秒あたりのpx）。null は全体表示 */
   const [zoom, setZoom] = useState<number | null>(null)
   /** 拡大・縮小の直後に合わせるスクロール量 */
@@ -61,12 +63,16 @@ export function Timeline(props: Props) {
     if (!el || pendingScrollRef.current === null) return
     el.scrollLeft = pendingScrollRef.current
     pendingScrollRef.current = null
-    setScrollLeft(el.scrollLeft)
+    scrollLeftRef.current = el.scrollLeft
   }, [pxPerSec])
 
-  // 再生位置が見えなくなったら、再生位置が左から1/3の位置に来るようスクロールする
+  // 再生位置が動いて見えなくなったら、再生位置が左から1/3の位置に来るようスクロールする。
+  // 拡大・縮小だけのときは追従しない（見ていた場所から再生位置へ飛ばないように）
+  const lastTimeRef = useRef(currentTime)
   useEffect(() => {
     const el = scrollRef.current
+    if (lastTimeRef.current === currentTime) return
+    lastTimeRef.current = currentTime
     if (!el || viewWidth === 0) return
     const x = timeToX(currentTime, pxPerSec)
     if (x < el.scrollLeft || x > el.scrollLeft + viewWidth - 8) {
@@ -88,7 +94,15 @@ export function Timeline(props: Props) {
   }
 
   // 波形は見えている範囲だけを、表示幅のキャンバスに描く（長い動画でもキャンバスが大きくなりすぎないように）
+  const sampleTimes = useMemo(() => props.samples.map((s) => s.time), [props.samples])
+  const scores = useMemo(() => props.samples.map((s) => s.score), [props.samples])
+  const maxScore = useMemo(
+    () => Math.max(props.startThreshold * CHART.scoreAxisHeadroom, 1e-6, ...scores),
+    [scores, props.startThreshold],
+  )
+
   const draw = useCallback(() => {
+    const scrollLeft = scrollLeftRef.current
     const canvas = canvasRef.current
     if (!canvas || viewWidth === 0) return
     const dpr = window.devicePixelRatio || 1
@@ -112,8 +126,6 @@ export function Timeline(props: Props) {
     band(props.excluded, CHART.excludedColor)
     band(props.freezes, CHART.freezeColor)
 
-    const scores = props.samples.map((s) => s.score)
-    const maxScore = Math.max(props.startThreshold * CHART.scoreAxisHeadroom, ...scores, 1e-6)
     const y = (v: number) => h - 2 - (v / maxScore) * (h - 4)
 
     ctx.strokeStyle = CHART.thresholdColor
@@ -130,13 +142,7 @@ export function Timeline(props: Props) {
     }
     ctx.setLineDash([])
 
-    const cols = waveformColumns(
-      props.samples.map((s) => s.time),
-      scores,
-      pxPerSec,
-      scrollLeft,
-      viewWidth,
-    )
+    const cols = waveformColumns(sampleTimes, scores, pxPerSec, scrollLeft, viewWidth)
     ctx.strokeStyle = CHART.scoreColor
     ctx.lineWidth = 1.5
     ctx.beginPath()
@@ -148,12 +154,18 @@ export function Timeline(props: Props) {
       drawing = true
     })
     ctx.stroke()
-  }, [viewWidth, pxPerSec, scrollLeft, props.samples, props.excluded, props.freezes, props.startThreshold, props.endThreshold])
+  }, [viewWidth, pxPerSec, sampleTimes, scores, maxScore, props.excluded, props.freezes, props.startThreshold, props.endThreshold])
+
+  // 次の描画フレームで1回だけ描き直す
+  const requestDraw = useCallback(() => {
+    cancelAnimationFrame(drawFrameRef.current)
+    drawFrameRef.current = requestAnimationFrame(draw)
+  }, [draw])
 
   useEffect(() => {
-    const raf = requestAnimationFrame(draw)
-    return () => cancelAnimationFrame(raf)
-  }, [draw])
+    requestDraw()
+    return () => cancelAnimationFrame(drawFrameRef.current)
+  }, [requestDraw])
 
   // タップでシーク（スクロールの指の動きでは click が発生しないので、なぞってスクロールしてもシークしない）
   const onClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -204,7 +216,10 @@ export function Timeline(props: Props) {
       <div
         ref={scrollRef}
         className="timeline-scroll"
-        onScroll={(e) => setScrollLeft(e.currentTarget.scrollLeft)}
+        onScroll={(e) => {
+          scrollLeftRef.current = e.currentTarget.scrollLeft
+          requestDraw()
+        }}
         onClick={onClick}
       >
         <div

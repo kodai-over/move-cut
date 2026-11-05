@@ -536,3 +536,10 @@ progress {
   color: var(--muted);
   cursor: pointer;
 }
+
+fieldset.plain {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
