@@ -6,7 +6,8 @@ import {
   diffRatio,
   expandBox,
   movingAverage,
-  nearCameraMask,
+  expandMask,
+  isNearCameraFrame,
   selectMainPose,
   skeletonScore,
   toCsv,
@@ -21,6 +22,7 @@ const PARAMS = {
   minReliableJoints: 6,
   smoothingWindowSec: 0.5,
   nearCameraFrameDiff: 0.1,
+  nearCameraPoseHeight: 0.6,
   nearCameraMarginSec: 1,
 }
 
@@ -187,6 +189,7 @@ describe('buildMotionSeries', () => {
     poseCount: mainPose ? 1 : 0,
     diffScore,
     frameDiff,
+    frameHeight: 1000,
   })
   const NO_SMOOTH = { ...PARAMS, smoothingWindowSec: 0.1 }
   const wrist = (p: Pose, dx: number) => moveJoints(p, [LANDMARK.rightWrist], dx, 0)
@@ -225,8 +228,9 @@ describe('buildMotionSeries', () => {
     const p = makePose()
     const frames = Array.from({ length: 41 }, (_, i) => {
       const t = i / 10
-      // 2.0秒だけ画面全体が大きく変わる
-      return frame(t, i % 2 ? wrist(p, 13) : p, 0.2, true, i === 20 ? 0.3 : 0.01)
+      // 2.0秒だけカメラの前を通り、画面全体が大きく変わって骨格が取れない
+      if (i === 20) return frame(t, null, 0.5, true, 0.3)
+      return frame(t, i % 2 ? wrist(p, 13) : p, 0.2, true, 0.01)
     })
     const s = buildMotionSeries(frames, NO_SMOOTH)
     const near = s.filter((r) => r.source === 'nearCamera').map((r) => r.time)
@@ -235,6 +239,13 @@ describe('buildMotionSeries', () => {
     expect(near).toHaveLength(21)
     expect(s.filter((r) => r.source === 'nearCamera').every((r) => r.score === 0)).toBe(true)
     expect(s[5].score).toBeGreaterThan(0)
+  })
+
+  it('離れて踊っている間は、画面全体が大きく変わっても（カメラの揺れ・照明）除外しない', () => {
+    const p = makePose() // 高さ100px / 画面1000px
+    const frames = Array.from({ length: 10 }, (_, i) => frame(i / 10, i % 2 ? wrist(p, 13) : p, 0.2, true, i === 0 ? null : 0.3))
+    const s = buildMotionSeries(frames, NO_SMOOTH)
+    expect(s.some((r) => r.source === 'nearCamera')).toBe(false)
   })
 
   it('関節が6個未満なら差分スコアを採用する', () => {
@@ -267,13 +278,27 @@ describe('buildMotionSeries', () => {
   })
 })
 
-describe('nearCameraMask', () => {
-  const fs = (diffs: (number | null)[]) => diffs.map((d, i) => ({ time: i / 10, frameDiff: d }))
-  it('閾値以上のフレームと前後の秒数を含める', () => {
-    expect(nearCameraMask(fs([0, 0, 0, 0.2, 0, 0, 0]), 0.1, 0.2)).toEqual([false, true, true, true, true, true, false])
+describe('expandMask', () => {
+  it('該当フレームと前後の秒数を含める', () => {
+    const times = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+    const hit = [false, false, false, true, false, false, false]
+    expect(expandMask(times, hit, 0.2)).toEqual([false, true, true, true, true, true, false])
   })
-  it('null は該当しない', () => {
-    expect(nearCameraMask(fs([null, 0.05]), 0.1, 1)).toEqual([false, false])
+})
+
+describe('isNearCameraFrame', () => {
+  const P = { nearCameraFrameDiff: 0.1, nearCameraPoseHeight: 0.6 }
+  it('画面全体の変化が小さければ該当しない', () => {
+    expect(isNearCameraFrame(0.05, false, null, P)).toBe(false)
+    expect(isNearCameraFrame(null, false, null, P)).toBe(false)
+  })
+  it('変化が大きく骨格が取れていなければ該当する（体の一部しか写っていない）', () => {
+    expect(isNearCameraFrame(0.3, false, null, P)).toBe(true)
+  })
+  it('骨格が取れていれば、体が画面の大部分を占めるときだけ該当する', () => {
+    expect(isNearCameraFrame(0.3, true, 0.8, P)).toBe(true)
+    // 離れて踊っている間のカメラの揺れ・照明の変化
+    expect(isNearCameraFrame(0.3, true, 0.3, P)).toBe(false)
   })
 })
 

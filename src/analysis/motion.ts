@@ -30,6 +30,7 @@ export interface MotionParams {
   minReliableJoints: number
   smoothingWindowSec: number
   nearCameraFrameDiff: number
+  nearCameraPoseHeight: number
   nearCameraMarginSec: number
 }
 
@@ -196,27 +197,35 @@ export function movingAverage(values: readonly number[], window: number): number
 }
 
 /**
- * カメラ付近にいるフレームを求める。画面全体の差分が閾値以上のフレームと、その前後 marginSec 秒を true にする
+ * 1フレームがカメラ付近か。画面全体の差分が閾値以上で、かつ本人の骨格が取れていないか、体が画面の大部分を占めるとき。
+ * 骨格が取れていて体が小さい（離れている）ときは、画面全体の変化はカメラの揺れや照明によるものとみなす
  */
-export function nearCameraMask(
-  frames: readonly Pick<FrameObservation, 'time' | 'frameDiff'>[],
-  threshold: number,
-  marginSec: number,
-): boolean[] {
+export function isNearCameraFrame(
+  frameDiff: number | null,
+  skeletonReliable: boolean,
+  poseHeightRatio: number | null,
+  params: Pick<MotionParams, 'nearCameraFrameDiff' | 'nearCameraPoseHeight'>,
+): boolean {
+  if (frameDiff === null || frameDiff < params.nearCameraFrameDiff) return false
+  if (!skeletonReliable) return true
+  return poseHeightRatio !== null && poseHeightRatio >= params.nearCameraPoseHeight
+}
+
+/** 該当フレーム（hit）と、その前後 marginSec 秒を true にする */
+export function expandMask(times: readonly number[], hit: readonly boolean[], marginSec: number): boolean[] {
   const eps = 1e-9
-  const hit = frames.map((f) => f.frameDiff !== null && f.frameDiff >= threshold)
-  const mask = new Array<boolean>(frames.length).fill(false)
+  const mask = new Array<boolean>(times.length).fill(false)
   // 前から：直近の該当フレームから marginSec 以内
   let last = -Infinity
-  for (let i = 0; i < frames.length; i++) {
-    if (hit[i]) last = frames[i].time
-    if (frames[i].time - last <= marginSec + eps) mask[i] = true
+  for (let i = 0; i < times.length; i++) {
+    if (hit[i]) last = times[i]
+    if (times[i] - last <= marginSec + eps) mask[i] = true
   }
   // 後ろから：次の該当フレームまで marginSec 以内
   let next = Infinity
-  for (let i = frames.length - 1; i >= 0; i--) {
-    if (hit[i]) next = frames[i].time
-    if (next - frames[i].time <= marginSec + eps) mask[i] = true
+  for (let i = times.length - 1; i >= 0; i--) {
+    if (hit[i]) next = times[i]
+    if (next - times[i] <= marginSec + eps) mask[i] = true
   }
   return mask
 }
@@ -234,7 +243,7 @@ export function buildMotionSeries(
 ): MotionSample[] {
   const raw: number[] = []
   const rows: Omit<MotionSample, 'score'>[] = []
-  const near = nearCameraMask(frames, params.nearCameraFrameDiff, params.nearCameraMarginSec)
+  const nearHit: boolean[] = []
   for (let i = 0; i < frames.length; i++) {
     const f = frames[i]
     // 別人どうしの位置の差を動きと誤認しないよう、追跡が続いているときだけ骨格スコアを計算する
@@ -252,10 +261,9 @@ export function buildMotionSeries(
       source = 'none'
       value = 0
     }
-    if (near[i]) {
-      source = 'nearCamera'
-      value = 0
-    }
+    const box = f.mainPose ? boundingBox(f.mainPose) : null
+    const heightRatio = box && f.frameHeight > 0 ? (box.maxY - box.minY) / f.frameHeight : null
+    nearHit.push(isNearCameraFrame(f.frameDiff, source === 'skeleton', heightRatio, params))
     raw.push(value)
     rows.push({
       time: f.time,
@@ -267,10 +275,22 @@ export function buildMotionSeries(
       poseCount: f.poseCount,
     })
   }
+  const near = expandMask(
+    rows.map((r) => r.time),
+    nearHit,
+    params.nearCameraMarginSec,
+  )
+  near.forEach((isNear, i) => {
+    if (!isNear) return
+    rows[i].source = 'nearCamera'
+    raw[i] = 0
+  })
   // 骨格を最初に検出する前・最後に検出した後は数えない（カメラ付近の判定を優先して残す）
   const first = rows.findIndex((r) => r.source === 'skeleton')
   if (first >= 0) {
-    const last = rows.findLastIndex((r) => r.source === 'skeleton')
+    // findLastIndex は古いiOS Safariにないため後ろから探す
+    let last = rows.length - 1
+    while (rows[last].source !== 'skeleton') last--
     rows.forEach((r, i) => {
       if ((i < first || i > last) && r.source !== 'nearCamera') {
         r.source = 'outside'

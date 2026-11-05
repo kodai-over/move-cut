@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildClips, detectMotion, segmentMotion } from './segment'
+import { buildClips, detectMotion, excludedIntervals, segmentMotion } from './segment'
 import type { MotionSample } from './types'
 import type { SegmentParams } from '../config'
 
@@ -176,5 +176,19 @@ describe('segmentMotion', () => {
     const params = { ...P, minClipSec: 10 }
     const s = series([1, 0.02], [2, 0.25], [3, 0.02, 90], [3, 0.02, 0])
     expect(segmentMotion(s, 10, params, 'idea', FP)).toEqual({ clips: [], freezes: [] })
+  })
+})
+
+describe('excludedIntervals', () => {
+  it('カメラ付近・本人検出前後の連続したサンプルを区間にまとめる', () => {
+    const s = series([0.3, 0], [0.5, 0.1], [0.2, 0])
+    s[0].source = 'outside'
+    s[1].source = 'nearCamera'
+    s[2].source = 'nearCamera'
+    s[9].source = 'nearCamera'
+    expect(excludedIntervals(s)).toEqual([
+      { start: 0, end: 0.3 },
+      { start: 0.9, end: 1.0 },
+    ])
   })
 })

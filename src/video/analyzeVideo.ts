@@ -80,7 +80,7 @@ export async function analyzeVideo(url: string, opts: AnalyzeOptions = {}): Prom
         ? diffRatio(prevGray, gray, width, height, ANALYSIS.diffPixelThreshold, null)
         : null
 
-      frames.push({ time, mainPose, continuous, poseCount: poses.length, diffScore, frameDiff })
+      frames.push({ time, mainPose, continuous, poseCount: poses.length, diffScore, frameDiff, frameHeight: height })
       prevGray = gray
       opts.onProgress?.((i + 1) / times.length)
     }

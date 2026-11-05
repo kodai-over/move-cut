@@ -35,6 +35,8 @@ export interface FrameObservation {
   diffScore: number | null
   /** 画面全体で前フレームから変化した画素の割合（カメラ付近の判定用。先頭フレームは null） */
   frameDiff: number | null
+  /** 解析画像の高さ（px）。本人の体の大きさを画面比にするために使う */
+  frameHeight: number
 }
 
 /** 採用したスコアの種別 */
