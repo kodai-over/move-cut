@@ -24,6 +24,7 @@ function series(...parts: [sec: number, score: number, angle?: number | null][])
         time: Math.round(out.length) / 10,
         skeletonScore: score,
         diffScore: null,
+        frameDiff: null,
         score,
         source: 'skeleton',
         trunkAngle: angle,
