@@ -25,8 +25,10 @@ export type Mode = 'idea' | 'run'
 export interface FrameObservation {
   /** 時刻（秒） */
   time: number
-  /** 本人とみなした骨格（検出なしなら null） */
+  /** 本人とみなした骨格（検出なし・見失い中なら null） */
   mainPose: Pose | null
+  /** 直前フレームの本人と同一人物として追跡できたか。false のフレームは骨格スコアを計算しない */
+  continuous: boolean
   /** 検出人数 */
   poseCount: number
   /** 差分スコア（先頭フレームなど算出できない場合は null） */

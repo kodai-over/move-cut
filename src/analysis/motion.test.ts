@@ -148,9 +148,10 @@ describe('movingAverage', () => {
 })
 
 describe('buildMotionSeries', () => {
-  const frame = (time: number, mainPose: Pose | null, diffScore: number | null): FrameObservation => ({
+  const frame = (time: number, mainPose: Pose | null, diffScore: number | null, continuous = true): FrameObservation => ({
     time,
     mainPose,
+    continuous,
     poseCount: mainPose ? 1 : 0,
     diffScore,
   })
@@ -171,6 +172,16 @@ describe('buildMotionSeries', () => {
     const s = buildMotionSeries(frames, { ...PARAMS, smoothingWindowSec: 0.1 })
     expect(s[1].source).toBe('diff')
     expect(s[1].skeletonScore).not.toBeNull()
+  })
+
+  it('追跡が途切れたフレームは骨格スコアを計算せず差分を使う', () => {
+    const a = makePose({ x: 0 })
+    const other = makePose({ x: 500 }) // 別人
+    const frames = [frame(0, a, null), frame(0.1, other, 0.02, false)]
+    const s = buildMotionSeries(frames, { ...PARAMS, smoothingWindowSec: 0.1 })
+    expect(s[1].skeletonScore).toBeNull()
+    expect(s[1].source).toBe('diff')
+    expect(s[1].score).toBeCloseTo(0.02)
   })
 
   it('0.5秒の移動平均で平滑化する', () => {

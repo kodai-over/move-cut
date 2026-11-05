@@ -1,7 +1,8 @@
 // 動画1本を解析して動きスコアの時系列を返す（フレーム取得 → 骨格推定 → 差分 → 統合）
 import { ANALYSIS } from '../config'
-import { boundingBox, buildMotionSeries, diffRatio, expandBox, selectMainPose, toGrayscale } from '../analysis/motion'
-import type { FrameObservation, MotionSample, Pose } from '../analysis/types'
+import { boundingBox, buildMotionSeries, diffRatio, expandBox, toGrayscale } from '../analysis/motion'
+import { INITIAL_TRACK_STATE, trackMainPose } from '../analysis/tracking'
+import type { FrameObservation, MotionSample } from '../analysis/types'
 import {
   UserFacingError,
   analysisSize,
@@ -43,7 +44,8 @@ export async function analyzeVideo(url: string, opts: AnalyzeOptions = {}): Prom
     const times = sampleTimes(info.duration)
     const frames: FrameObservation[] = []
     let prevGray: Uint8Array | null = null
-    let prevPose: Pose | null = null
+    let track = INITIAL_TRACK_STATE
+    const frameDiagonal = Math.hypot(width, height)
 
     for (let i = 0; i < times.length; i++) {
       if (opts.signal?.aborted) throw new DOMException('中止しました', 'AbortError')
@@ -53,17 +55,20 @@ export async function analyzeVideo(url: string, opts: AnalyzeOptions = {}): Prom
       const gray = toGrayscale(ctx.getImageData(0, 0, width, height).data)
 
       const poses = detector.detect(canvas, Math.round(time * 1000))
-      const mainPose = selectMainPose(poses)
+      // 差分の範囲は「直前に本人を見た位置」なので、追跡を更新する前に決める
+      const lastSeen = track.seenPrevFrame ? track.last : null
+      const tracked = trackMainPose(poses, track, time, frameDiagonal)
+      track = tracked.state
+      const { mainPose, continuous } = tracked
 
       // 直前に本人を検出できていれば、その周辺だけで差分を取る
-      const roi = prevPose ? expandBox(boundingBox(prevPose), ANALYSIS.diffRoiMargin, width, height) : null
+      const roi = lastSeen ? expandBox(boundingBox(lastSeen), ANALYSIS.diffRoiMargin, width, height) : null
       const diffScore = prevGray
         ? diffRatio(prevGray, gray, width, height, ANALYSIS.diffPixelThreshold, roi)
         : null
 
-      frames.push({ time, mainPose, poseCount: poses.length, diffScore })
+      frames.push({ time, mainPose, continuous, poseCount: poses.length, diffScore })
       prevGray = gray
-      prevPose = mainPose
       opts.onProgress?.((i + 1) / times.length)
     }
 

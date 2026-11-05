@@ -197,7 +197,8 @@ export function buildMotionSeries(
   const rows: Omit<MotionSample, 'score'>[] = []
   for (let i = 0; i < frames.length; i++) {
     const f = frames[i]
-    const prev = i > 0 ? frames[i - 1].mainPose : null
+    // 別人どうしの位置の差を動きと誤認しないよう、追跡が続いているときだけ骨格スコアを計算する
+    const prev = i > 0 && f.continuous ? frames[i - 1].mainPose : null
     const sk = skeletonScore(prev, f.mainPose, params.jointMinConfidence)
     let source: ScoreSource
     let value: number
