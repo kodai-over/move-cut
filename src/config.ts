@@ -169,4 +169,6 @@ export const EXPORT = {
   thumbnailWidth: 160,
   /** サムネイルに使う時刻（クリップ開始からの秒数。余白の分だけ後ろにずらす） */
   thumbnailOffsetSec: 0.7,
+  /** サムネイルのJPEG画質（0〜1） */
+  thumbnailQuality: 0.7,
 } as const

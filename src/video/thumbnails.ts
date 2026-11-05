@@ -29,7 +29,7 @@ export async function generateThumbnails(
       try {
         await seekTo(video, Math.min(Math.max(0, times[i]), info.duration))
         ctx.drawImage(video, 0, 0, width, height)
-        onEach(i, canvas.toDataURL('image/jpeg', 0.7))
+        onEach(i, canvas.toDataURL('image/jpeg', EXPORT.thumbnailQuality))
       } catch (e) {
         console.warn('サムネイルを作れませんでした', e)
       }

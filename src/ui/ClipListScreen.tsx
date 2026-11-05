@@ -37,10 +37,13 @@ export function ClipListScreen({ video, duration, clips, onBack }: Props) {
   const [state, setState] = useState<ExportState>({ step: 'idle' })
   const exporterRef = useRef<ClipExporter | null>(null)
   const releaseWakeLockRef = useRef<(() => void) | null>(null)
+  /** サムネイル作成の中止用。書き出し中は4K動画のデコードが重ならないよう止める */
+  const thumbsAbortRef = useRef<AbortController | null>(null)
 
   // サムネイルは余白の分だけ後ろのコマを使う（動き始めが写るように）
   useEffect(() => {
     const controller = new AbortController()
+    thumbsAbortRef.current = controller
     const times = clips.map((c) => Math.min(c.start + EXPORT.thumbnailOffsetSec, c.end))
     void generateThumbnails(
       video.url,
@@ -78,15 +81,24 @@ export function ClipListScreen({ video, duration, clips, onBack }: Props) {
     })
   }
 
-  const onTimeUpdate = () => {
+  // クリップの終わりで止める。timeupdate は間隔が粗く行き過ぎるため、再生中は毎フレーム確かめる
+  useEffect(() => {
+    if (playing === null) return
     const el = previewRef.current
-    if (!el || playing === null) return
-    // クリップの終わりで止める
-    if (el.currentTime >= clips[playing].end) {
-      el.pause()
-      setPlaying(null)
+    if (!el) return
+    const end = clips[playing].end
+    const frame = { id: 0 }
+    const check = () => {
+      if (el.currentTime >= end) {
+        el.pause()
+        setPlaying(null)
+        return
+      }
+      frame.id = requestAnimationFrame(check)
     }
-  }
+    frame.id = requestAnimationFrame(check)
+    return () => cancelAnimationFrame(frame.id)
+  }, [playing, clips])
 
   const finish = (next: ExportState) => {
     void exporterRef.current?.dispose()
@@ -99,14 +111,18 @@ export function ClipListScreen({ video, duration, clips, onBack }: Props) {
   const exportBatch = async (batches: NumberedClip[][], batch: number, saved: number) => {
     setState({ step: 'exporting', batches, batch, done: 0, saved })
     try {
-      if (!exporterRef.current) {
+      let exporter = exporterRef.current
+      if (!exporter) {
         // ffmpeg.wasm は大きいので書き出し時に読み込む
         const { createClipExporter } = await import('../video/clipExporter')
-        exporterRef.current = await createClipExporter(video.file)
+        exporter = await createClipExporter(video.file)
+        exporterRef.current = exporter
       }
       const files: File[] = []
       for (const c of batches[batch]) {
-        files.push(await exporterRef.current.exportClip(c.clip, c.number))
+        // 画面を離れて片付けられたら終える
+        if (exporterRef.current !== exporter) return
+        files.push(await exporter.exportClip(c.clip, c.number))
         setState({ step: 'exporting', batches, batch, done: files.length, saved })
       }
       setState({ step: 'ready', batches, batch, files, cancelled: false, saved })
@@ -118,8 +134,12 @@ export function ClipListScreen({ video, duration, clips, onBack }: Props) {
   }
 
   const startExport = async () => {
+    if (busy) return
+    // 二度押しで書き出しが重ならないよう、待つ前に書き出し中へ切り替える
+    setState({ step: 'exporting', batches: plannedBatches, batch: 0, done: 0, saved: 0 })
     previewRef.current?.pause()
     setPlaying(null)
+    thumbsAbortRef.current?.abort()
     releaseWakeLockRef.current = await keepScreenAwake()
     await exportBatch(plannedBatches, 0, 0)
   }
@@ -162,7 +182,6 @@ export function ClipListScreen({ video, duration, clips, onBack }: Props) {
         controls
         playsInline
         preload="metadata"
-        onTimeUpdate={onTimeUpdate}
         onPause={() => setPlaying(null)}
       />
       <p className="hint">クリップをタップするとプレビューします。残すクリップにチェックを付けてください。</p>
