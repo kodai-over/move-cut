@@ -18,3 +18,7 @@ samples/
 *.log
 .claude/settings.local.json
 .claude/worktrees/
+
+# 自動配置されるモデル・WASM（scripts/fetch-assets.mjs）
+public/models/
+public/mediapipe/
