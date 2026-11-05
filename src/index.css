@@ -1,0 +1,12 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif;
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  padding: max(16px, env(safe-area-inset-top)) 16px 16px;
+}
