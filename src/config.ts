@@ -51,4 +51,76 @@ export const DOWNLOAD_URL_REVOKE_DELAY_MS = 10_000
 export const CHART = {
   /** 体幹角度の軸の最大値（度） */
   trunkAngleMaxDeg: 180,
+  /** 切り出し区間の帯の色 */
+  clipColor: 'rgba(47, 124, 246, 0.14)',
+  /** フリーズ区間の帯の色 */
+  freezeColor: 'rgba(255, 159, 28, 0.35)',
+  /** 開始閾値（実線）・終了閾値（破線）の色 */
+  thresholdColor: 'rgba(47, 124, 246, 0.7)',
+} as const
+
+/** 区間の切り出し（ステップ2）のうち、スライダーで変えるパラメータ */
+export interface SegmentParams {
+  /** 開始閾値：スコアがこれを上回る状態が続いたら「動き開始」 */
+  startThreshold: number
+  /** 終了閾値：スコアがこれを下回る状態が区切り静止秒数続いたら「動き終了」 */
+  endThreshold: number
+  /** 区切り静止秒数 */
+  stillSec: number
+  /** 区間の前に付ける余白（秒） */
+  marginBeforeSec: number
+  /** 区間の後に付ける余白（秒） */
+  marginAfterSec: number
+  /** 間隔がこれ未満の隣接区間は1つにまとめる（秒） */
+  mergeSec: number
+  /** これ未満の区間は捨てる（秒） */
+  minClipSec: number
+}
+
+/** 開始閾値の初期値。フェーズ1の実動画で静止 0.02〜0.06・ダンス 0.08〜0.18 だったため 0.08 とする */
+const START_THRESHOLD = 0.08
+/** 終了閾値は開始閾値のこの割合 */
+export const END_THRESHOLD_RATIO = 0.6
+
+/** モード別のパラメータ初期値 */
+export const SEGMENT_DEFAULTS = {
+  idea: {
+    startThreshold: START_THRESHOLD,
+    endThreshold: START_THRESHOLD * END_THRESHOLD_RATIO,
+    stillSec: 2.0,
+    marginBeforeSec: 0.5,
+    marginAfterSec: 0.7,
+    mergeSec: 1.0,
+    minClipSec: 1.5,
+  },
+  run: {
+    startThreshold: START_THRESHOLD,
+    endThreshold: START_THRESHOLD * END_THRESHOLD_RATIO,
+    stillSec: 5.0,
+    marginBeforeSec: 1.0,
+    marginAfterSec: 1.0,
+    mergeSec: 3.0,
+    minClipSec: 3.0,
+  },
+} as const satisfies Record<'idea' | 'run', SegmentParams>
+
+/** 区間の切り出しのうち、スライダーで変えない固定パラメータ */
+export const SEGMENT = {
+  /** 開始閾値を上回る状態がこの秒数続いたら「動き開始」 */
+  startHoldSec: 0.3,
+  /** フリーズ判定：静止の直前に動きを調べる秒数 */
+  freezeLookbackSec: 1.0,
+  /** フリーズ判定：直前の動きのピークに求める大きさ（開始閾値の倍率） */
+  freezePeakRatio: 2,
+  /** フリーズ判定：体幹の鉛直からの傾きの下限（度） */
+  freezeMinTrunkDeg: 45,
+  /** フリーズとして区間に含める最大秒数 */
+  freezeMaxSec: 5.0,
+} as const
+
+/** スライダーの範囲と刻み */
+export const SLIDER = {
+  threshold: { min: 0.01, max: 0.3, step: 0.005 },
+  stillSec: { min: 0.5, max: 10, step: 0.5 },
+  marginSec: { min: 0, max: 3, step: 0.1 },
 } as const
