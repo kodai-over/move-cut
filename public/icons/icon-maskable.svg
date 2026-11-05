@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- マスク可能アイコン：Androidなどで丸く切り抜かれても欠けないよう、図柄を中央80%に収める -->
+  <rect width="512" height="512" fill="#2f7cf6"/>
+  <g transform="translate(256 256) scale(0.72) translate(-256 -256)">
+    <path d="M206 168 L346 256 L206 344 Z" fill="#ffffff"/>
+    <path d="M150 140 H118 V372 H150" fill="none" stroke="#ffffff" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M362 140 H394 V372 H362" fill="none" stroke="#ffffff" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

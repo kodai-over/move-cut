@@ -10,6 +10,7 @@ import { SelectScreen } from './ui/SelectScreen'
 import { AnalyzingScreen } from './ui/AnalyzingScreen'
 import { ResultScreen } from './ui/ResultScreen'
 import { ClipListScreen } from './ui/ClipListScreen'
+import { UpdateBanner } from './ui/UpdateBanner'
 
 export interface SelectedVideo {
   file: File
@@ -78,6 +79,7 @@ function App() {
       <header className="app-header">
         <h1>MoveCut</h1>
       </header>
+      <UpdateBanner canUpdate={state.screen === 'select'} />
       {state.screen === 'select' && (
         <SelectScreen
           video={video}
