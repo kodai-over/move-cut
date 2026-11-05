@@ -26,7 +26,7 @@ export function UpdateBanner({ canUpdate }: Props) {
   if (offlineReady) {
     return (
       <div className="banner" role="status">
-        <span>電波がなくても使えるようになりました。</span>
+        <span>電波がなくても使えるようになりました。ホーム画面に追加しておくと、しばらく使わなくても消えにくくなります。</span>
         <button type="button" className="banner-action" onClick={() => setOfflineReady(false)}>
           閉じる
         </button>

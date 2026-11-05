@@ -3,7 +3,10 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
-/** Service Worker でキャッシュする1ファイルの上限。ffmpeg.wasm のコア（約31MB）も入るようにする */
+/**
+ * Service Worker でキャッシュする1ファイルの上限。ffmpeg.wasm のコア（約31MB）も入るようにする。
+ * アプリ実行時ではなくビルド時の設定のため、src/config.ts ではなくここに置く
+ */
 const MAX_CACHE_FILE_BYTES = 40 * 1024 * 1024
 
 // GitHub Pages（https://<user>.github.io/move-cut/）で配信するためのベースパス
