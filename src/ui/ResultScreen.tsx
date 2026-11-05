@@ -17,12 +17,31 @@ interface Props {
 export function ResultScreen({ video, mode, samples, onBack }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [currentTime, setCurrentTime] = useState(0)
+  /** 最後にタップされた時刻（初回の再生準備中に続けてタップされた場合も最新を使う） */
+  const pendingSeekRef = useRef(0)
 
   const seek = (time: number) => {
     const el = videoRef.current
     if (!el) return
-    el.currentTime = time
     setCurrentTime(time)
+    pendingSeekRef.current = time
+    if (el.played.length > 0 || !el.paused) {
+      el.currentTime = time
+      return
+    }
+    // iOS Safari は一度も再生していない動画だと、シークしても表示中のコマが更新されない。
+    // タップ（ユーザー操作）の中で無音のまま一瞬再生して止め、描画できる状態にしてからシークする
+    const wasMuted = el.muted
+    el.muted = true
+    el.play()
+      .then(() => el.pause())
+      .catch(() => {
+        // 再生できない環境でも、シークだけは試みる
+      })
+      .finally(() => {
+        el.muted = wasMuted
+        el.currentTime = pendingSeekRef.current
+      })
   }
 
   const exportCsv = () => {
@@ -39,6 +58,7 @@ export function ResultScreen({ video, mode, samples, onBack }: Props) {
         src={video.url}
         controls
         playsInline
+        preload="auto"
         onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
       />
 
