@@ -18,7 +18,13 @@ export interface AnalyzeOptions {
   signal?: AbortSignal
 }
 
-export async function analyzeVideo(url: string, opts: AnalyzeOptions = {}): Promise<MotionSample[]> {
+/** 解析結果。duration は動画の長さ（秒） */
+export interface AnalysisResult {
+  samples: MotionSample[]
+  duration: number
+}
+
+export async function analyzeVideo(url: string, opts: AnalyzeOptions = {}): Promise<AnalysisResult> {
   const video = createVideoElement(url)
   const info = await loadVideoInfo(video)
   const { width, height } = analysisSize(info)
@@ -75,7 +81,7 @@ export async function analyzeVideo(url: string, opts: AnalyzeOptions = {}): Prom
     }
 
     if (frames.length === 0) throw new UserFacingError('解析できるフレームがありませんでした。動画が短すぎる可能性があります。')
-    return buildMotionSeries(frames)
+    return { samples: buildMotionSeries(frames), duration: info.duration }
   } finally {
     detector.close()
     detach()

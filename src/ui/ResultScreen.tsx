@@ -1,24 +1,33 @@
-// 解析結果画面：プレビュー動画と動きスコアのグラフ、CSV書き出し
-import { useRef, useState } from 'react'
+// 解析結果画面：プレビュー動画、動きスコアのグラフと切り出し区間、パラメータ調整、CSV書き出し
+import { useMemo, useRef, useState } from 'react'
 import type { Mode, MotionSample } from '../analysis/types'
 import { toCsv } from '../analysis/motion'
+import { segmentMotion } from '../analysis/segment'
+import { SEGMENT_DEFAULTS, type SegmentParams } from '../config'
 import type { SelectedVideo } from '../App'
 import { baseName, downloadText } from './browser'
 import { MotionChart } from './MotionChart'
-import { MODE_LABEL } from './labels'
+import { MODE_LABEL, formatDuration } from './labels'
+import { ParamSliders } from './ParamSliders'
 
 interface Props {
   video: SelectedVideo
   mode: Mode
   samples: MotionSample[]
+  /** 動画の長さ（秒）。区間の末尾をこの範囲に収める */
+  duration: number
   onBack: () => void
 }
 
-export function ResultScreen({ video, mode, samples, onBack }: Props) {
+export function ResultScreen({ video, mode, samples, duration, onBack }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [currentTime, setCurrentTime] = useState(0)
   /** 最後にタップされた時刻（初回の再生準備中に続けてタップされた場合も最新を使う） */
   const pendingSeekRef = useRef(0)
+  const [params, setParams] = useState<SegmentParams>(SEGMENT_DEFAULTS[mode])
+  // 解析はやり直さず、区間の計算だけをやり直す
+  const { clips, freezes } = useMemo(() => segmentMotion(samples, duration, params, mode), [samples, duration, params, mode])
+  const totalSec = clips.reduce((sum, c) => sum + (c.end - c.start), 0)
 
   const seek = (time: number) => {
     const el = videoRef.current
@@ -69,9 +78,36 @@ export function ResultScreen({ video, mode, samples, onBack }: Props) {
       {samples.length === 0 ? (
         <p className="message error">解析結果が空です。別の動画でお試しください。</p>
       ) : (
-        <MotionChart samples={samples} currentTime={currentTime} onSeek={seek} />
+        <MotionChart
+          samples={samples}
+          currentTime={currentTime}
+          clips={clips}
+          freezes={freezes}
+          startThreshold={params.startThreshold}
+          endThreshold={params.endThreshold}
+          onSeek={seek}
+        />
       )}
-      <p className="hint">グラフをタップすると、その時刻にプレビューが移動します。</p>
+      <p className="hint">
+        青い帯が切り出し区間、オレンジの帯がフリーズ。実線が開始閾値、破線が終了閾値です。グラフをタップすると、その時刻にプレビューが移動します。
+      </p>
+
+      <p className="summary" aria-live="polite">
+        切り出し区間 <strong>{clips.length}</strong> 個（合計 {formatDuration(totalSec)}）
+      </p>
+      {clips.length > 0 && (
+        <ol className="clip-list">
+          {clips.map((c, i) => (
+            <li key={`${c.start}-${c.end}`}>
+              <button type="button" className="clip-chip" onClick={() => seek(c.start)}>
+                {i + 1}. {formatDuration(c.start)}〜{formatDuration(c.end)}
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      <ParamSliders params={params} onChange={setParams} onReset={() => setParams(SEGMENT_DEFAULTS[mode])} />
 
       <div className="actions">
         <button className="button secondary" onClick={exportCsv} disabled={samples.length === 0}>
