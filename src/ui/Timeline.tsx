@@ -71,12 +71,14 @@ export function Timeline(props: Props) {
 
   // 再生位置が動いて見えなくなったら、再生位置が左から1/3の位置に来るようスクロールする。
   // 拡大・縮小だけのときは追従しない（見ていた場所から再生位置へ飛ばないように）
+  // 区間の帯をタップした直後は、続くダブルタップの2回目が別の場所に当たらないよう追従しない
   const lastTimeRef = useRef(currentTime)
+  const followPausedUntilRef = useRef(0)
   useEffect(() => {
     const el = scrollRef.current
     if (lastTimeRef.current === currentTime) return
     lastTimeRef.current = currentTime
-    if (!el || viewWidth === 0) return
+    if (!el || viewWidth === 0 || performance.now() < followPausedUntilRef.current) return
     const x = timeToX(currentTime, pxPerSec)
     if (x < el.scrollLeft || x > el.scrollLeft + viewWidth - 8) {
       el.scrollLeft = Math.max(0, x - viewWidth / 3)
@@ -191,6 +193,7 @@ export function Timeline(props: Props) {
       return
     }
     lastTapRef.current = { key, at: now }
+    followPausedUntilRef.current = performance.now() + TIMELINE.doubleTapMs
     onTapClip(i)
   }
 

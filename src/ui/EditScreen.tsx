@@ -59,12 +59,16 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
   const select = (i: number) => setSelectedKey(clipKey(intervals[i]))
 
   // ffmpeg.wasm は1つだけ使い回し、キーフレームの読み取りと書き出しを順番に実行する
-  const run = useClipExporter(video.file)
+  const exporter = useClipExporter(video.file)
 
-  // キーフレームの時刻を読む（開始位置の吸着用。フェーズ6で使う。ここでは目盛りとして表示する）
+  // キーフレームの時刻を読む（開始位置の吸着用。フェーズ6で使う。ここでは目盛りとして表示する）。
+  // 失敗したら、保存（共有シート）の後にもう一度試す
+  const hasKeyframes = keyframes !== null
   useEffect(() => {
+    if (hasKeyframes || busy) return
     let cancelled = false
-    run((exporter) => exporter.keyframeTimes())
+    exporter
+      .run((ex) => ex.keyframeTimes())
       .then((times) => !cancelled && setKeyframes(times))
       .catch((e) => {
         // 読めなくても編集・保存はできるので、目盛りを出さないだけにする
@@ -73,7 +77,7 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
     return () => {
       cancelled = true
     }
-  }, [run])
+  }, [exporter, hasKeyframes, busy])
 
   // クリップだけを再生しているときは、終わりで止める（timeupdate は間隔が粗いので毎フレーム確かめる）
   useEffect(() => {
@@ -207,7 +211,7 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
         video={video}
         duration={duration}
         chosen={chosen}
-        run={run}
+        exporter={exporter}
         onBusyChange={setBusy}
         onBeforeStart={stopPreview}
       />

@@ -7,9 +7,9 @@ import { EXPORT } from '../config'
 import { estimateClipBytes, planBatches, type NumberedClip } from '../export/batch'
 import { UserFacingError } from '../video/videoFile'
 import type { SelectedVideo } from '../App'
-import { saveFiles } from './browser'
+import { keepScreenAwake, saveFiles } from './browser'
 import { formatDuration } from './labels'
-import type { RunWithExporter } from './useClipExporter'
+import type { ExporterQueue } from './useClipExporter'
 
 interface Props {
   video: SelectedVideo
@@ -17,7 +17,7 @@ interface Props {
   duration: number
   /** 保存するクリップ（number は区間の連番。ファイル名に使う） */
   chosen: NumberedClip[]
-  run: RunWithExporter
+  exporter: ExporterQueue
   /** 保存（共有シート）の途中か（途中は選択などを変えさせない） */
   onBusyChange: (busy: boolean) => void
   /** 保存を始める直前に呼ぶ（プレビューを止めるなど） */
@@ -31,7 +31,7 @@ type Status = { kind: 'saved'; count: number; all: boolean } | { kind: 'cancelle
 
 const MB = 1024 * 1024
 
-export function ClipSaver({ video, duration, chosen, run, onBusyChange, onBeforeStart }: Props) {
+export function ClipSaver({ video, duration, chosen, exporter, onBusyChange, onBeforeStart }: Props) {
   const batches = useMemo(
     () => planBatches(chosen, video.file.size, duration, EXPORT.maxBatchBytes),
     [chosen, video.file.size, duration],
@@ -50,47 +50,67 @@ export function ClipSaver({ video, duration, chosen, run, onBusyChange, onBefore
   const [retry, setRetry] = useState(0)
   const [busy, setBusy] = useState(false)
 
-  /** 書き出し済みのファイル（いま保存する回のものだけを持つ）。描画のきっかけには version を使う */
-  const preparedRef = useRef(new Map<string, File>())
-  const [, setVersion] = useState(0)
+  /** 書き出し済みのファイル（いま保存する回のものだけを持つ）。裏の書き出し処理からは ref で最新を読む */
+  const [prepared, setPrepared] = useState<ReadonlyMap<string, File>>(new Map())
+  const preparedRef = useRef<ReadonlyMap<string, File>>(prepared)
+  const wantedRef = useRef<ReadonlySet<string>>(new Set())
+  /** 要らなくなったファイルを手放して（メモリを空ける）、必要なら1つ加える */
+  const updatePrepared = (add?: [string, File]) => {
+    const next = new Map([...preparedRef.current].filter(([k]) => wantedRef.current.has(k)))
+    if (add) next.set(...add)
+    preparedRef.current = next
+    setPrepared(next)
+  }
 
   useEffect(() => onBusyChange(busy), [busy, onBusyChange])
 
   // いま保存する回のクリップを裏で書き出しておく。選び直しが続くあいだは待ち、落ち着いてから始める
   useEffect(() => {
-    const keys = new Set(target.map(fileKey))
-    // 要らなくなったファイルは手放してメモリを空ける
-    for (const k of [...preparedRef.current.keys()]) if (!keys.has(k)) preparedRef.current.delete(k)
-    setVersion((v) => v + 1)
-    if (target.every((c) => preparedRef.current.has(fileKey(c)))) return
+    wantedRef.current = new Set(target.map(fileKey))
     let cancelled = false
+    let releaseWakeLock: (() => void) | null = null
     const timer = window.setTimeout(async () => {
-      for (const c of target) {
-        const key = fileKey(c)
-        if (cancelled) return
-        if (preparedRef.current.has(key)) continue
-        try {
-          const file = await run((exporter) => (cancelled ? Promise.resolve(null) : exporter.exportClip(c.clip, c.number)))
-          if (cancelled || !file) return
-          preparedRef.current.set(key, file)
-          setVersion((v) => v + 1)
-        } catch (e) {
+      updatePrepared()
+      if (target.every((c) => preparedRef.current.has(fileKey(c)))) return
+      // 書き出し中に画面が消えると止まるので、スリープを防ぐ
+      releaseWakeLock = await keepScreenAwake()
+      try {
+        for (const c of target) {
           if (cancelled) return
-          console.error(e)
-          const message = e instanceof UserFacingError ? e.message : `書き出し中にエラーが起きました（${String(e)}）`
-          setPrepareError({ signature: targetSignature, message })
-          return
+          const key = fileKey(c)
+          if (preparedRef.current.has(key)) continue
+          try {
+            const file = await exporter.run((ex) =>
+              cancelled || preparedRef.current.has(key) ? Promise.resolve(null) : ex.exportClip(c.clip, c.number),
+            )
+            // 途中で選び直されても、まだ使うクリップなら書き出した結果を使う
+            if (file && wantedRef.current.has(key)) updatePrepared([key, file])
+          } catch (e) {
+            if (cancelled) return
+            console.error(e)
+            const message = e instanceof UserFacingError ? e.message : `書き出し中にエラーが起きました（${String(e)}）`
+            setPrepareError({ signature: targetSignature, message })
+            return
+          }
         }
+        // 書き終えたら ffmpeg.wasm を終了してメモリを空ける（書き出したファイルは保存まで持つ）
+        if (!cancelled) exporter.release()
+      } finally {
+        releaseWakeLock?.()
+        releaseWakeLock = null
       }
     }, EXPORT.prepareDelayMs)
     return () => {
       cancelled = true
       window.clearTimeout(timer)
+      releaseWakeLock?.()
+      releaseWakeLock = null
     }
-    // target は targetSignature が同じなら中身も同じなので、targetSignature で再実行を判断する
-  }, [targetSignature, run, retry])
+    // updatePrepared は ref だけを読み書きするので、作り直されても再実行は要らない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target, targetSignature, exporter, retry])
 
-  const preparedCount = target.filter((c) => preparedRef.current.has(fileKey(c))).length
+  const preparedCount = target.filter((c) => prepared.has(fileKey(c))).length
   const ready = target.length > 0 && preparedCount === target.length
 
   const chosenSec = chosen.reduce((s, c) => s + (c.clip.end - c.clip.start), 0)
@@ -101,7 +121,7 @@ export function ClipSaver({ video, duration, chosen, run, onBusyChange, onBefore
   // 共有シートはタップ直後にしか開けないため、ボタンのクリックから待たずに呼ぶ
   const save = async () => {
     if (!ready || busy) return
-    const files = target.map((c) => preparedRef.current.get(fileKey(c))!)
+    const files = target.map((c) => prepared.get(fileKey(c))!)
     onBeforeStart()
     setBusy(true)
     try {
@@ -120,6 +140,13 @@ export function ClipSaver({ video, duration, chosen, run, onBusyChange, onBefore
     } finally {
       setBusy(false)
     }
+  }
+
+  // 共有シートをキャンセルした回を飛ばす（分けて保存するときだけ）
+  const skipRound = () => {
+    const isLast = current.round + 1 >= batches.length
+    setProgress({ signature, round: isLast ? current.round : current.round + 1, saved: current.saved, done: isLast })
+    setStatus(isLast ? { signature, status: { kind: 'saved', count: current.saved, all: true } } : null)
   }
 
   const restart = () => {
@@ -141,6 +168,11 @@ export function ClipSaver({ video, duration, chosen, run, onBusyChange, onBefore
         </p>
       )}
       {shownStatus?.kind === 'cancelled' && <p className="message warning">保存をキャンセルしました。</p>}
+      {shownStatus?.kind === 'cancelled' && multiRound && !current.done && (
+        <button className="button secondary" onClick={skipRound} disabled={busy}>
+          {current.round + 1 >= batches.length ? '保存せずに終わる' : 'この回は保存せずに次へ進む'}
+        </button>
+      )}
       {shownStatus?.kind === 'error' && <p className="message error">{shownStatus.message}</p>}
       {shownPrepareError && (
         <>
