@@ -250,6 +250,43 @@ export function Timeline(props: Props) {
     interactingRef.current = true
     endInteractionLater()
   }
+
+  // マウスでつかんで横にドラッグするとスクロールする（指はブラウザのスクロールに任せる）。
+  // 少しでも動かしたら、離したときのクリック（帯のタップなど）は無視する
+  const mouseDragRef = useRef<{ pointerId: number; startX: number; startScroll: number; moved: boolean } | null>(null)
+  const suppressClickRef = useRef(false)
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return
+    mouseDragRef.current = { pointerId: e.pointerId, startX: e.clientX, startScroll: e.currentTarget.scrollLeft, moved: false }
+  }
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = mouseDragRef.current
+    if (!drag || drag.pointerId !== e.pointerId) return
+    const dx = e.clientX - drag.startX
+    if (!drag.moved) {
+      if (Math.abs(dx) < TIMELINE.dragThresholdPx) return
+      drag.moved = true
+      e.currentTarget.setPointerCapture(e.pointerId)
+      interactingRef.current = true
+      touchingRef.current = true
+      window.clearTimeout(scrollIdleRef.current)
+    }
+    e.currentTarget.scrollLeft = drag.startScroll - dx
+  }
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = mouseDragRef.current
+    if (!drag || drag.pointerId !== e.pointerId) return
+    mouseDragRef.current = null
+    if (!drag.moved) return
+    suppressClickRef.current = true
+    touchingRef.current = false
+    endInteractionLater()
+  }
+  const onClickCapture = (e: React.MouseEvent) => {
+    if (!suppressClickRef.current) return
+    suppressClickRef.current = false
+    e.stopPropagation()
+  }
   useEffect(() => () => window.clearTimeout(scrollIdleRef.current), [])
 
   // 1回目のタップで頭から再生し、続けて同じ帯をタップしたらダブルタップとして残す／捨てるを切り替える。
@@ -302,6 +339,11 @@ export function Timeline(props: Props) {
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}
         onWheel={onWheel}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onClickCapture={onClickCapture}
         onClick={props.onTapEmpty}
       >
         <div className="timeline-content" style={{ width: trackWidth + viewWidth, height: CONTENT_HEIGHT }}>

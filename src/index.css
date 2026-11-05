@@ -353,6 +353,13 @@ progress::-moz-progress-bar {
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x;
   scrollbar-width: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.timeline-scroll:active {
+  cursor: grabbing;
 }
 
 .timeline-scroll::-webkit-scrollbar {
