@@ -29,7 +29,12 @@ export async function keepScreenAwake(): Promise<() => void> {
 
 /** テキストをファイルとしてダウンロードさせる */
 export function downloadText(text: string, filename: string, type: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type }))
+  downloadBlob(new Blob([text], { type }), filename)
+}
+
+/** Blob をファイルとしてダウンロードさせる */
+export function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = filename
@@ -43,4 +48,28 @@ export function downloadText(text: string, filename: string, type: string): void
 export function baseName(filename: string): string {
   const i = filename.lastIndexOf('.')
   return i > 0 ? filename.slice(0, i) : filename
+}
+
+/** 共有シートでファイルを渡せるか（iPhoneのSafariなど） */
+export function canShareFiles(files: File[]): boolean {
+  return typeof navigator.canShare === 'function' && navigator.canShare({ files })
+}
+
+/**
+ * 動画を保存する。共有シートが使えれば共有シート（「ビデオを保存」で写真アプリへ）、使えなければダウンロード。
+ * 共有シートはタップ直後にしか開けないため、ボタンのクリック処理から直接呼ぶ。
+ * 共有シートをキャンセルした場合は 'cancelled' を返す
+ */
+export async function saveFiles(files: File[]): Promise<'shared' | 'downloaded' | 'cancelled'> {
+  if (canShareFiles(files)) {
+    try {
+      await navigator.share({ files })
+      return 'shared'
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return 'cancelled'
+      throw e
+    }
+  }
+  for (const f of files) downloadBlob(f, f.name)
+  return 'downloaded'
 }
