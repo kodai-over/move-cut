@@ -23,6 +23,7 @@ interface Props {
   currentTime: number
   clips: Interval[]
   freezes: Interval[]
+  excluded: Interval[]
   startThreshold: number
   endThreshold: number
   onSeek: (time: number) => void
@@ -31,6 +32,7 @@ interface Props {
 interface OverlayOptions {
   clips: Interval[]
   freezes: Interval[]
+  excluded: Interval[]
   startThreshold: number
   endThreshold: number
 }
@@ -55,6 +57,7 @@ const overlayPlugin: Plugin<'line', OverlayOptions> = {
         ctx.fillRect(x0, from, Math.max(1, x1 - x0), to - from)
       }
     }
+    band(opts.excluded ?? [], CHART.excludedColor, top, bottom)
     band(opts.clips ?? [], CHART.clipColor, top, bottom)
     // フリーズは区間の帯の下側に別色で重ねる
     band(opts.freezes ?? [], CHART.freezeColor, top, bottom)
@@ -93,11 +96,20 @@ const cursorPlugin: Plugin<'line', { time: number }> = {
   },
 }
 
-export function MotionChart({ samples, currentTime, clips, freezes, startThreshold, endThreshold, onSeek }: Props) {
+export function MotionChart({
+  samples,
+  currentTime,
+  clips,
+  freezes,
+  excluded,
+  startThreshold,
+  endThreshold,
+  onSeek,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const chartRef = useRef<Chart<'line', { x: number; y: number | null }[]> | null>(null)
   const onSeekRef = useRef(onSeek)
-  const overlayRef = useRef<OverlayOptions>({ clips, freezes, startThreshold, endThreshold })
+  const overlayRef = useRef<OverlayOptions>({ clips, freezes, excluded, startThreshold, endThreshold })
   useEffect(() => {
     onSeekRef.current = onSeek
   }, [onSeek])
@@ -155,7 +167,7 @@ export function MotionChart({ samples, currentTime, clips, freezes, startThresho
           },
           // @ts-expect-error 独自プラグインのオプション
           cursor: { time: 0 },
-          overlay: { clips: [], freezes: [], startThreshold: 0, endThreshold: 0 },
+          overlay: { clips: [], freezes: [], excluded: [], startThreshold: 0, endThreshold: 0 },
         },
         onClick: (event, _elements, c) => {
           if (event.x == null) return
@@ -175,9 +187,9 @@ export function MotionChart({ samples, currentTime, clips, freezes, startThresho
 
   // 区間・閾値だけを更新する（スライダー操作のたびにグラフを作り直さない）
   useEffect(() => {
-    overlayRef.current = { clips, freezes, startThreshold, endThreshold }
+    overlayRef.current = { clips, freezes, excluded, startThreshold, endThreshold }
     if (chartRef.current) setOverlay(chartRef.current, overlayRef.current)
-  }, [clips, freezes, startThreshold, endThreshold])
+  }, [clips, freezes, excluded, startThreshold, endThreshold])
 
   // 再生位置の縦線だけを更新する
   useEffect(() => {

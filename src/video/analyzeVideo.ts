@@ -75,7 +75,12 @@ export async function analyzeVideo(url: string, opts: AnalyzeOptions = {}): Prom
         ? diffRatio(prevGray, gray, width, height, ANALYSIS.diffPixelThreshold, roi)
         : null
 
-      frames.push({ time, mainPose, continuous, poseCount: poses.length, diffScore })
+      // カメラ付近の判定用に、画面全体の差分も取る
+      const frameDiff = prevGray
+        ? diffRatio(prevGray, gray, width, height, ANALYSIS.diffPixelThreshold, null)
+        : null
+
+      frames.push({ time, mainPose, continuous, poseCount: poses.length, diffScore, frameDiff, frameHeight: height })
       prevGray = gray
       opts.onProgress?.((i + 1) / times.length)
     }

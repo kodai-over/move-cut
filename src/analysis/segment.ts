@@ -17,6 +17,20 @@ export interface SegmentResult {
   freezes: Interval[]
 }
 
+/** 動きとして数えなかった時間（カメラ付近・本人検出前後）を区間にまとめる。各サンプルは次のサンプルの時刻まで続くとみなす */
+export function excludedIntervals(samples: MotionSample[]): Interval[] {
+  const out: Interval[] = []
+  const dt = sampleInterval(samples)
+  samples.forEach((s, i) => {
+    if (s.source !== 'nearCamera' && s.source !== 'outside') return
+    const end = i + 1 < samples.length ? samples[i + 1].time : s.time + dt
+    const last = out[out.length - 1]
+    if (last && Math.abs(last.end - s.time) < 1e-9) last.end = end
+    else out.push({ start: s.time, end })
+  })
+  return out
+}
+
 /** サンプル間隔（秒）。2点未満なら0 */
 function sampleInterval(samples: MotionSample[]): number {
   return samples.length >= 2 ? samples[1].time - samples[0].time : 0

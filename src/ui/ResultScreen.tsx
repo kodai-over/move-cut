@@ -2,7 +2,7 @@
 import { useMemo, useRef, useState } from 'react'
 import type { Mode, MotionSample } from '../analysis/types'
 import { toCsv } from '../analysis/motion'
-import { segmentMotion } from '../analysis/segment'
+import { excludedIntervals, segmentMotion } from '../analysis/segment'
 import { SEGMENT_DEFAULTS, type SegmentParams } from '../config'
 import type { SelectedVideo } from '../App'
 import { baseName, downloadText } from './browser'
@@ -27,6 +27,7 @@ export function ResultScreen({ video, mode, samples, duration, onBack }: Props) 
   const [params, setParams] = useState<SegmentParams>(SEGMENT_DEFAULTS[mode])
   // 解析はやり直さず、区間の計算だけをやり直す
   const { clips, freezes } = useMemo(() => segmentMotion(samples, duration, params, mode), [samples, duration, params, mode])
+  const excluded = useMemo(() => excludedIntervals(samples), [samples])
   const totalSec = clips.reduce((sum, c) => sum + (c.end - c.start), 0)
 
   const seek = (time: number) => {
@@ -83,13 +84,14 @@ export function ResultScreen({ video, mode, samples, duration, onBack }: Props) 
           currentTime={currentTime}
           clips={clips}
           freezes={freezes}
+          excluded={excluded}
           startThreshold={params.startThreshold}
           endThreshold={params.endThreshold}
           onSeek={seek}
         />
       )}
       <p className="hint">
-        青い帯が切り出し区間、オレンジの帯がフリーズ。実線が開始閾値、破線が終了閾値です。グラフをタップすると、その時刻にプレビューが移動します。
+        青い帯が切り出し区間、オレンジの帯がフリーズ、灰色の帯はカメラ付近などで動きとして数えなかった時間。実線が開始閾値、破線が終了閾値です。グラフをタップすると、その時刻にプレビューが移動します。
       </p>
 
       <p className="summary" aria-live="polite">

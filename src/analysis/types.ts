@@ -33,16 +33,29 @@ export interface FrameObservation {
   poseCount: number
   /** 差分スコア（先頭フレームなど算出できない場合は null） */
   diffScore: number | null
+  /** 画面全体で前フレームから変化した画素の割合（カメラ付近の判定用。先頭フレームは null） */
+  frameDiff: number | null
+  /** 解析画像の高さ（px）。本人の体の大きさを画面比にするために使う */
+  frameHeight: number
 }
 
 /** 採用したスコアの種別 */
-export type ScoreSource = 'skeleton' | 'diff' | 'none'
+export type ScoreSource =
+  | 'skeleton'
+  | 'diff'
+  | 'none'
+  /** カメラのすぐ近くに人がいる（撮影ボタンを押しに行く・カメラの前を通る）ため数えない */
+  | 'nearCamera'
+  /** 本人の骨格を最初に検出する前・最後に検出した後のため数えない */
+  | 'outside'
 
 /** 動きスコアの1行（CSV・グラフの元データ） */
 export interface MotionSample {
   time: number
   skeletonScore: number | null
   diffScore: number | null
+  /** 画面全体の差分（カメラ付近の判定用） */
+  frameDiff: number | null
   /** 平滑化後の統合スコア */
   score: number
   source: ScoreSource
