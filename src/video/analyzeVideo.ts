@@ -55,8 +55,10 @@ export async function analyzeVideo(url: string, opts: AnalyzeOptions = {}): Prom
       const gray = toGrayscale(ctx.getImageData(0, 0, width, height).data)
 
       const poses = detector.detect(canvas, Math.round(time * 1000))
-      // 差分の範囲は「直前に本人を見た位置」なので、追跡を更新する前に決める
-      const lastSeen = track.seenPrevFrame ? track.last : null
+      // 差分の範囲は「最後に本人を見た位置」。見失って間もないうちはその位置を使い、
+      // 画面全体（他人の動きを含む）で差分を取らないようにする。追跡を更新する前に決める
+      const lastSeen =
+        track.last && time - track.lastTime <= ANALYSIS.trackLostResetSec ? track.last : null
       const tracked = trackMainPose(poses, track, time, frameDiagonal)
       track = tracked.state
       const { mainPose, continuous } = tracked
