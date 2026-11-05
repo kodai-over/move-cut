@@ -21,8 +21,24 @@ export function ResultScreen({ video, mode, samples, onBack }: Props) {
   const seek = (time: number) => {
     const el = videoRef.current
     if (!el) return
-    el.currentTime = time
     setCurrentTime(time)
+    if (el.played.length > 0 || !el.paused) {
+      el.currentTime = time
+      return
+    }
+    // iOS Safari は一度も再生していない動画だと、シークしても表示中のコマが更新されない。
+    // タップ（ユーザー操作）の中で無音のまま一瞬再生して止め、描画できる状態にしてからシークする
+    const wasMuted = el.muted
+    el.muted = true
+    el.play()
+      .then(() => el.pause())
+      .catch(() => {
+        // 再生できない環境でも、シークだけは試みる
+      })
+      .finally(() => {
+        el.muted = wasMuted
+        el.currentTime = time
+      })
   }
 
   const exportCsv = () => {
@@ -39,6 +55,7 @@ export function ResultScreen({ video, mode, samples, onBack }: Props) {
         src={video.url}
         controls
         playsInline
+        preload="auto"
         onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
       />
 
