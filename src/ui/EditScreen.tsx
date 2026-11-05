@@ -1,5 +1,7 @@
 // 編集画面：上にプレビュー、すぐ下にタイムライン（コマの帯・動きの波形・区間の帯）。
-// 区間の帯をタップで頭から再生、ダブルタップで残す／捨てる、選んだ帯の両端をドラッグして伸縮する。
+// まとめて選んだ動画は、撮った順に1本のタイムラインにつなげる。プレビューは再生位置にある動画に切り替え、
+// 動画の終わりまで再生したら次の動画を続けて再生する。解析が終わっていない動画は「解析中」と表示する。
+// 区間の帯をタップで頭から再生、ダブルタップで残す／捨てる、選んだ帯の両端をドラッグして伸縮する（動画をまたいでは伸ばせない）。
 // 書き出しは別画面。スライダー（AIの提案の作り直し）は設定シートに置く
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Interval } from '../analysis/segment'
@@ -9,32 +11,43 @@ import { excludedIntervals, segmentMotion } from '../analysis/segment'
 import { PREVIEW, SEGMENT_DEFAULTS, TIMELINE, type SegmentParams } from '../config'
 import type { NumberedClip } from '../export/batch'
 import { clipsFromIntervals, trimClip, type ClipEdge, type EditClip } from '../timeline/clips'
+import { globalClipId, locate, shiftIntervals, shiftTimes, sourceOffsets, splitClipId } from '../timeline/sources'
 import type { FilmstripFrame } from '../video/analyzeVideo'
-import type { SelectedVideo } from '../App'
+import type { AnalyzingProgress, SourceAnalysis, SourceVideo } from '../App'
 import { baseName, downloadText } from './browser'
 import { ExportScreen } from './ExportScreen'
 import { Icon } from './icons'
 import { Preview } from './Preview'
 import { SettingsSheet } from './SettingsSheet'
-import { Timeline } from './Timeline'
+import { Timeline, type PendingRange } from './Timeline'
 import { useClipExporter } from './useClipExporter'
 
 interface Props {
-  video: SelectedVideo
-  samples: MotionSample[]
-  duration: number
-  filmstrip: FilmstripFrame[]
-  frameAspect: number
+  sources: SourceVideo[]
+  analyses: SourceAnalysis[]
+  /** 裏で解析中の動画（なければ null） */
+  analyzing: AnalyzingProgress | null
   params: SegmentParams
   onChangeParams: (params: SegmentParams) => void
   onBack: () => void
 }
 
-export function EditScreen({ video, samples, duration, filmstrip, frameAspect, params, onChangeParams, onBack }: Props) {
+/** 手で変えたクリップ（動画ごと）。作ったときのパラメータと違えば（AIの提案を作り直したら）使わない */
+interface Edits {
+  params: SegmentParams
+  bySource: ReadonlyMap<number, EditClip[]>
+}
+
+export function EditScreen({ sources, analyses, analyzing, params, onChangeParams, onBack }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  /** 再生位置（全体の時刻） */
   const [currentTime, setCurrentTime] = useState(0)
   const [playing, setPlaying] = useState(false)
-  /** 最後にシークを頼んだ時刻（初回の再生準備中に続けてシークされた場合も最新を使う） */
+  /** プレビューに読み込んでいる動画 */
+  const [active, setActive] = useState(0)
+  /** 動画を切り替えたあと、読み込めたらシークする動画内の時刻と、続けて再生するか */
+  const switchRef = useRef<{ local: number; play: boolean } | null>(null)
+  /** 最後にシークを頼んだ動画内の時刻（初回の再生準備中に続けてシークされた場合も最新を使う） */
   const pendingSeekRef = useRef(0)
   /** クリップだけを再生中なら、そのクリップの番号（終わりで止める） */
   const [playingClipId, setPlayingClipId] = useState<number | null>(null)
@@ -42,74 +55,142 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
   const [view, setView] = useState<'edit' | 'export'>('edit')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [keyframes, setKeyframes] = useState<number[] | null>(null)
+  /** 動画ごとのキーフレームの時刻（読めなかったら null。吸着させない） */
+  const [keyframes, setKeyframes] = useState<ReadonlyMap<number, number[] | null>>(new Map())
   /** シークのために無音で一瞬再生している間（再生中の扱いにしない） */
   const warmingUpRef = useRef(false)
   /** 書き出し画面で書き出したファイル（編集に戻っても、変えていないクリップは書き出し直さない） */
   const exportCacheRef = useRef<ReadonlyMap<string, File>>(new Map())
+  const [edits, setEdits] = useState<Edits | null>(null)
 
-  // 解析はやり直さず、区間の計算だけをやり直す
-  const { clips: intervals, freezes } = useMemo(
-    () => segmentMotion(samples, duration, params, 'idea'),
-    [samples, duration, params],
+  const durations = useMemo(() => sources.map((s) => s.duration), [sources])
+  const offsets = useMemo(() => sourceOffsets(durations), [durations])
+  const total = durations.reduce((a, b) => a + b, 0)
+  const last = sources.length - 1
+  const results = useMemo(() => analyses.map((a) => (a.status === 'done' ? a.result : null)), [analyses])
+
+  // 解析はやり直さず、区間の計算だけをやり直す（動画ごと）
+  const segments = useMemo(
+    () => results.map((r) => (r ? segmentMotion(r.samples, r.duration, params, 'idea') : null)),
+    [results, params],
   )
-  const excluded = useMemo(() => excludedIntervals(samples), [samples])
-  /** 手で変えたクリップ（AIの提案が作り直されたら使わない） */
-  const [edited, setEdited] = useState<{ source: Interval[]; clips: EditClip[] } | null>(null)
-  const suggested = useMemo(() => clipsFromIntervals(intervals), [intervals])
-  const clips = edited?.source === intervals ? edited.clips : suggested
-  const setClips = (next: EditClip[]) => setEdited({ source: intervals, clips: next })
+  const suggested = useMemo(() => segments.map((s) => (s ? clipsFromIntervals(s.clips) : [])), [segments])
+  const validEdits = edits?.params === params ? edits.bySource : null
+  /** 動画ごとのクリップ（動画内の時刻） */
+  const sourceClips = useMemo(
+    () => suggested.map((clips, i) => validEdits?.get(i) ?? clips),
+    [suggested, validEdits],
+  )
+  const setSourceClips = (updates: ReadonlyMap<number, EditClip[]>) =>
+    setEdits((prev) => {
+      const base = prev?.params === params ? prev.bySource : new Map<number, EditClip[]>()
+      return { params, bySource: new Map([...base, ...updates]) }
+    })
+
+  // タイムラインに出すもの（全体の時刻）
+  const timeline = useMemo(() => {
+    const samples: MotionSample[] = []
+    const filmstrip: FilmstripFrame[] = []
+    const freezes: Interval[] = []
+    const excluded: Interval[] = []
+    const pending: PendingRange[] = []
+    results.forEach((r, i) => {
+      const offset = offsets[i]
+      if (!r) {
+        const a = analyses[i]
+        const label = a.status === 'error' ? '解析できませんでした' : '解析中…'
+        pending.push({ start: offset, end: offset + durations[i], label, title: a.status === 'error' ? a.message : undefined })
+        return
+      }
+      samples.push(...shiftTimes(r.samples, offset))
+      filmstrip.push(...shiftTimes(r.filmstrip, offset))
+      freezes.push(...shiftIntervals(segments[i]?.freezes ?? [], offset))
+      excluded.push(...shiftIntervals(excludedIntervals(r.samples), offset))
+    })
+    return { samples, filmstrip, freezes, excluded, pending }
+  }, [results, analyses, offsets, durations, segments])
+  const frameAspect = results.find((r) => r)?.frameAspect ?? 1
+  const clips = useMemo(
+    () =>
+      sourceClips.flatMap((list, i) =>
+        shiftIntervals(list, offsets[i]).map((c) => ({ ...c, id: globalClipId(i, c.id) })),
+      ),
+    [sourceClips, offsets],
+  )
+  const keyframeTicks = useMemo(
+    () => [...keyframes].flatMap(([i, times]) => (times ? times.map((t) => t + offsets[i]) : [])).sort((a, b) => a - b),
+    [keyframes, offsets],
+  )
 
   const chosen: NumberedClip[] = useMemo(
-    () => clips.flatMap((c, i) => (c.keep ? [{ number: i + 1, clip: c }] : [])),
-    [clips],
+    () =>
+      sourceClips.flatMap((list, source) =>
+        list.flatMap((c, i) => (c.keep ? [{ source, number: i + 1, clip: { start: c.start, end: c.end } }] : [])),
+      ),
+    [sourceClips],
   )
 
   // ffmpeg.wasm は1つだけ使い回し、キーフレームの読み取りと書き出しを順番に実行する
-  const exporter = useClipExporter(video.file)
+  const files = useMemo(() => sources.map((s) => s.file), [sources])
+  const exporter = useClipExporter(files)
 
-  // キーフレームの時刻を読む（開始のつまみの吸着用）。失敗したら、保存（共有シート）の後にもう一度試す
-  const hasKeyframes = keyframes !== null
+  // キーフレームの時刻を動画ごとに順に読む（開始のつまみの吸着用）。読み終えたら ffmpeg.wasm を終了してメモリを空ける
+  const nextKeyframeSource = sources.findIndex((_, i) => !keyframes.has(i))
   useEffect(() => {
-    if (hasKeyframes || busy) return
-    let cancelled = false
+    if (busy) return
+    if (nextKeyframeSource < 0) {
+      exporter.release()
+      return
+    }
+    const i = nextKeyframeSource
+    const state = { cancelled: false }
     exporter
-      .run((ex) => ex.keyframeTimes())
-      .then((times) => !cancelled && setKeyframes(times))
+      .run((ex) => ex.keyframeTimes(i))
+      .then((times) => !state.cancelled && setKeyframes((prev) => new Map(prev).set(i, times)))
       .catch((e) => {
+        if (state.cancelled) return
         // 読めなくても編集・保存はできるので、吸着させないだけにする
-        if (!cancelled) console.warn('キーフレームを読めませんでした', e)
+        console.warn('キーフレームを読めませんでした', e)
+        setKeyframes((prev) => new Map(prev).set(i, null))
       })
     return () => {
-      cancelled = true
+      state.cancelled = true
     }
-  }, [exporter, hasKeyframes, busy])
+  }, [exporter, nextKeyframeSource, busy])
 
   // 再生中は毎フレーム再生位置を読む（タイムラインを滑らかに流すため。timeupdate は間隔が粗い）。
   // クリップだけを再生しているときは、終わりで止める
   const playingClip = playingClipId === null ? null : (clips.find((c) => c.id === playingClipId) ?? null)
   const playingClipEnd = playingClip?.end ?? null
+  const activeOffset = offsets[active] ?? 0
   useEffect(() => {
     if (!playing) return
     const el = videoRef.current
     if (!el) return
     const frame = { id: 0 }
     const tick = () => {
-      if (playingClipEnd !== null && el.currentTime >= playingClipEnd) {
+      const time = activeOffset + el.currentTime
+      if (playingClipEnd !== null && time >= playingClipEnd) {
         el.pause()
-        el.currentTime = playingClipEnd
+        el.currentTime = playingClipEnd - activeOffset
         setCurrentTime(playingClipEnd)
         setPlayingClipId(null)
         return
       }
-      setCurrentTime(el.currentTime)
+      setCurrentTime(time)
       frame.id = requestAnimationFrame(tick)
     }
     frame.id = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame.id)
-  }, [playing, playingClipEnd])
+  }, [playing, playingClipEnd, activeOffset])
 
-  /** 動画だけをシークする（再生位置の状態は変えない） */
+  /** プレビューを index 本目の動画に切り替え、読み込めたら local へシークする（play なら続けて再生する） */
+  const switchTo = (index: number, local: number, play: boolean) => {
+    switchRef.current = { local, play }
+    setActive(index)
+  }
+
+  /** 動画だけをシークする（再生位置の状態は変えない）。time は動画内の時刻 */
   const seekVideo = (time: number) => {
     const el = videoRef.current
     if (!el) return
@@ -119,7 +200,7 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
       return
     }
     // iOS Safari は一度も再生していない動画だと、シークしても表示中のコマが更新されない。
-    // ユーザー操作の中で無音のまま一瞬再生して止め、描画できる状態にしてからシークする
+    // 無音のまま一瞬再生して止め、描画できる状態にしてからシークする
     const wasMuted = el.muted
     el.muted = true
     // この再生で play イベントが出ても再生中にしない（再生位置が 0 に戻って見えるため）
@@ -136,24 +217,50 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
       })
   }
 
+  /** 全体の時刻へシークする（別の動画なら切り替える） */
   const seek = (time: number) => {
     setCurrentTime(time)
-    seekVideo(time)
+    const { index, local } = locate(time, offsets, durations)
+    if (index !== active) switchTo(index, local, false)
+    else seekVideo(local)
+  }
+
+  // 動画を読み込めたら、切り替えたときに頼まれた位置へシークする（書き出し画面から戻ったときは再生位置に戻す）
+  const onLoaded = () => {
+    const el = videoRef.current
+    if (!el) return
+    const request = switchRef.current
+    switchRef.current = null
+    const local = request?.local ?? currentTime - activeOffset
+    if (request?.play) {
+      el.currentTime = local
+      // 再生中に次の動画へ切り替えたときは続けて再生する（断られたら止まったままにする）
+      void el.play().catch(() => {})
+    } else if (local > 0) {
+      seekVideo(local)
+    }
+  }
+
+  // 動画の終わりまで再生したら、次の動画を続けて再生する
+  const onEnded = () => {
+    if (active >= last) return
+    setCurrentTime(offsets[active + 1])
+    switchTo(active + 1, 0, true)
   }
 
   const setPlayingIfReal = (next: boolean) => {
     if (!warmingUpRef.current) setPlaying(next)
   }
 
+  const stop = () => {
+    videoRef.current?.pause()
+    setPlayingClipId(null)
+  }
+
   /** タイムラインをなぞった：再生中なら止めてからシークする */
   const scrub = (time: number) => {
     if (playing) stop()
     seek(time)
-  }
-
-  const stop = () => {
-    videoRef.current?.pause()
-    setPlayingClipId(null)
   }
 
   const togglePlay = () => {
@@ -164,7 +271,15 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
       return
     }
     setPlayingClipId(null)
-    if (el.ended || el.currentTime >= duration - PREVIEW.restartNearEndSec) el.currentTime = 0
+    // 最後まで再生し終えていたら、先頭から再生し直す
+    if (currentTime >= total - PREVIEW.restartNearEndSec) {
+      setCurrentTime(0)
+      if (active !== 0) {
+        switchTo(0, 0, true)
+        return
+      }
+      el.currentTime = 0
+    }
     void el.play().catch(() => {})
   }
 
@@ -172,70 +287,90 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
     const el = videoRef.current
     const clip = clips.find((c) => c.id === id)
     if (!el || !clip) return
+    const { source } = splitClipId(id)
     setSelectedId(id)
-    el.currentTime = clip.start
     setCurrentTime(clip.start)
     setPlayingClipId(id)
+    const local = clip.start - offsets[source]
+    if (source !== active) {
+      switchTo(source, local, true)
+      return
+    }
+    el.currentTime = local
     void el.play().catch(() => {
       // 再生できなくても、シーク位置の表示は試みる
     })
   }
 
   const toggleKeep = (id: number) => {
-    setClips(clips.map((c) => (c.id === id ? { ...c, keep: !c.keep } : c)))
+    const { source, localId } = splitClipId(id)
+    const list = sourceClips[source]
+    setSourceClips(new Map([[source, list.map((c) => (c.id === localId ? { ...c, keep: !c.keep } : c))]]))
   }
 
-  const setAll = (keep: boolean) => setClips(clips.map((c) => ({ ...c, keep })))
+  const setAll = (keep: boolean) =>
+    setSourceClips(new Map(sourceClips.map((list, i) => [i, list.map((c) => ({ ...c, keep }))])))
 
   // つまみのドラッグ。動かし始めたときのクリップを元に毎回計算する（縮め戻せば合体も元に戻る）
-  const trimRef = useRef<{ snapshot: EditClip[]; id: number; edge: ClipEdge; time: number } | null>(null)
+  const trimRef = useRef<{ source: number; snapshot: EditClip[]; localId: number; edge: ClipEdge; time: number } | null>(
+    null,
+  )
   const trimStart = (id: number, edge: ClipEdge) => {
     stop()
-    const clip = clips.find((c) => c.id === id)
+    const { source, localId } = splitClipId(id)
+    const clip = sourceClips[source]?.find((c) => c.id === localId)
     if (!clip) return
-    trimRef.current = { snapshot: clips, id, edge, time: edge === 'start' ? clip.start : clip.end }
+    trimRef.current = { source, snapshot: sourceClips[source], localId, edge, time: edge === 'start' ? clip.start : clip.end }
   }
   const trim = (time: number) => {
     const t = trimRef.current
     if (!t) return
-    const next = trimClip(t.snapshot, t.id, t.edge, time, { duration, minSec: TIMELINE.minClipSec, keyframes })
-    const moved = next.find((c) => c.id === t.id)
+    const limits = { duration: durations[t.source], minSec: TIMELINE.minClipSec, keyframes: keyframes.get(t.source) ?? null }
+    const next = trimClip(t.snapshot, t.localId, t.edge, time - offsets[t.source], limits)
+    const moved = next.find((c) => c.id === t.localId)
     if (!moved) return
-    setClips(next)
+    setSourceClips(new Map([[t.source, next]]))
     // 動かしている端のコマをプレビューに出す（タイムラインは動かさない）
     const edgeTime = t.edge === 'start' ? moved.start : moved.end
     if (edgeTime !== t.time) {
       t.time = edgeTime
-      seekVideo(edgeTime)
+      if (t.source === active) seekVideo(edgeTime)
+      else switchTo(t.source, edgeTime, false)
     }
   }
   const trimEnd = () => {
     const t = trimRef.current
     trimRef.current = null
     // 離したら、動かした端に再生位置を合わせる
-    if (t) setCurrentTime(t.time)
+    if (t) setCurrentTime(offsets[t.source] + t.time)
   }
 
   // スライダーはAIの提案を作り直す。手で変えた内容があれば確かめてから捨てる
   const changeParams = (next: SegmentParams) => {
     const same = (Object.keys(next) as (keyof SegmentParams)[]).every((k) => next[k] === params[k])
     if (same) return
-    if (edited?.source === intervals && !window.confirm('手で調整した内容が消えます。作り直しますか？')) return
-    setEdited(null)
+    if (validEdits && validEdits.size > 0 && !window.confirm('手で調整した内容が消えます。作り直しますか？')) return
+    setEdits(null)
     setSelectedId(null)
     onChangeParams(next)
   }
 
-  const exportCsv = () => downloadText(toCsv(samples), `${baseName(video.file.name)}_motion.csv`, 'text/csv')
+  // CSV は再生位置にある動画のもの
+  const activeResult = results[active]
+  const exportCsv = () => {
+    if (!activeResult) return
+    downloadText(toCsv(activeResult.samples), `${baseName(sources[active].file.name)}_motion.csv`, 'text/csv')
+  }
+
+  const pendingCount = analyses.filter((a) => a.status === 'pending').length
 
   if (view === 'export') {
     return (
       <ExportScreen
-        video={video}
-        duration={duration}
+        sources={sources}
+        results={results}
         chosen={chosen}
-        filmstrip={filmstrip}
-        frameAspect={frameAspect}
+        pendingCount={pendingCount}
         exporter={exporter}
         cacheRef={exportCacheRef}
         busy={busy}
@@ -249,20 +384,24 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
     <section className="editor">
       <Preview
         videoRef={videoRef}
-        src={video.url}
+        src={sources[active].url}
         currentTime={currentTime}
-        duration={duration}
+        duration={total}
         playing={playing}
         onTogglePlay={togglePlay}
         onPlayingChange={setPlayingIfReal}
-        onLoaded={() => {
-          if (currentTime > 0) seekVideo(currentTime)
-        }}
+        onLoaded={onLoaded}
+        onEnded={onEnded}
       >
         <div className="bar overlay">
           <button type="button" className="icon-button" onClick={() => setSettingsOpen(true)} aria-label="設定" title="設定">
             <Icon name="sliders" />
           </button>
+          {analyzing && sources.length > 1 && (
+            <span className="analyzing-pill" title="残りの動画を解析しています。終わった動画から編集できます">
+              解析中 {analyzing.index + 1}/{sources.length}・{Math.floor(analyzing.progress * 100)}%
+            </span>
+          )}
           <button
             type="button"
             className="pill"
@@ -278,31 +417,29 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
         </div>
       </Preview>
 
-      {samples.length === 0 ? (
-        <p className="message error">解析結果が空です。別の動画でお試しください。</p>
-      ) : (
-        <Timeline
-          duration={duration}
-          samples={samples}
-          filmstrip={filmstrip}
-          frameAspect={frameAspect}
-          clips={clips}
-          freezes={freezes}
-          excluded={excluded}
-          startThreshold={params.startThreshold}
-          endThreshold={params.endThreshold}
-          keyframes={keyframes}
-          currentTime={currentTime}
-          selectedId={selectedId}
-          onScrub={scrub}
-          onTapClip={playClip}
-          onDoubleTapClip={toggleKeep}
-          onTapEmpty={() => setSelectedId(null)}
-          onTrimStart={trimStart}
-          onTrim={trim}
-          onTrimEnd={trimEnd}
-        />
-      )}
+      <Timeline
+        duration={total}
+        samples={timeline.samples}
+        filmstrip={timeline.filmstrip}
+        frameAspect={frameAspect}
+        clips={clips}
+        freezes={timeline.freezes}
+        excluded={timeline.excluded}
+        pending={timeline.pending}
+        boundaries={offsets.slice(1)}
+        startThreshold={params.startThreshold}
+        endThreshold={params.endThreshold}
+        keyframes={keyframeTicks}
+        currentTime={currentTime}
+        selectedId={selectedId}
+        onScrub={scrub}
+        onTapClip={playClip}
+        onDoubleTapClip={toggleKeep}
+        onTapEmpty={() => setSelectedId(null)}
+        onTrimStart={trimStart}
+        onTrim={trim}
+        onTrimEnd={trimEnd}
+      />
 
       {settingsOpen && (
         <SettingsSheet
@@ -311,6 +448,7 @@ export function EditScreen({ video, samples, duration, filmstrip, frameAspect, p
           onResetParams={() => changeParams(SEGMENT_DEFAULTS.idea)}
           onSetAll={setAll}
           onExportCsv={exportCsv}
+          canExportCsv={activeResult !== null}
           onBack={onBack}
           onClose={() => setSettingsOpen(false)}
         />

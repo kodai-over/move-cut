@@ -1,8 +1,9 @@
 // まとめて書き出すクリップを、メモリに収まる単位（バッチ）に分ける。UI・ブラウザAPIに依存しない
 import type { Interval } from '../analysis/segment'
 
-/** 書き出すクリップ（number は一覧での連番、1始まり。ファイル名に使う） */
+/** 書き出すクリップ（source は何本目の動画か。number はその動画の中での連番、1始まり。ファイル名に使う。clip は動画内の時刻） */
 export interface NumberedClip {
+  source: number
   number: number
   clip: Interval
 }
@@ -19,15 +20,15 @@ export function estimateClipBytes(clip: Interval, sourceBytes: number, sourceDur
  */
 export function planBatches(
   clips: readonly NumberedClip[],
-  sourceBytes: number,
-  sourceDuration: number,
+  /** クリップの推定サイズ（バイト）。元動画ごとにビットレートが違うので呼び出し側で計算する */
+  estimate: (clip: NumberedClip) => number,
   maxBytes: number,
 ): NumberedClip[][] {
   const batches: NumberedClip[][] = []
   let current: NumberedClip[] = []
   let currentBytes = 0
   for (const c of clips) {
-    const bytes = estimateClipBytes(c.clip, sourceBytes, sourceDuration)
+    const bytes = estimate(c)
     if (current.length > 0 && currentBytes + bytes > maxBytes) {
       batches.push(current)
       current = []

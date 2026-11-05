@@ -195,6 +195,24 @@ button {
 }
 
 /* 解析中 */
+.analyzing-count {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.analyzing-pill {
+  margin-right: auto;
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 .percent {
   margin: 0;
   font-size: 72px;
@@ -461,6 +479,38 @@ progress::-moz-progress-bar {
   pointer-events: none;
 }
 
+/* 動画のつなぎ目 */
+.source-boundary {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--panel);
+  pointer-events: none;
+}
+
+/* 解析が終わっていない動画の範囲 */
+.pending-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.04) 0 6px, transparent 6px 12px);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.pending-range span {
+  position: sticky;
+  left: 8px;
+  right: 8px;
+}
+
 /* 再生位置は中央に固定する */
 .playhead {
   position: absolute;
@@ -553,6 +603,12 @@ progress::-moz-progress-bar {
   margin: 0 auto;
 }
 
+.export-note {
+  margin: 0 16px 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .export-total {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -638,4 +694,9 @@ progress::-moz-progress-bar {
   * {
     scroll-behavior: auto !important;
   }
+}
+
+.chip:disabled {
+  opacity: 0.4;
+  cursor: default;
 }

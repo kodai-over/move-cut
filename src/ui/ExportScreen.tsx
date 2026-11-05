@@ -1,19 +1,21 @@
-// 書き出し画面：残すクリップを並べて見せ、写真アプリに保存する
+// 書き出し画面：残すクリップを並べて見せ、写真アプリに保存する（まとめて選んだ動画のクリップもまとめて保存する）
+import type { RefObject } from 'react'
 import { estimateClipBytes, type NumberedClip } from '../export/batch'
-import type { FilmstripFrame } from '../video/analyzeVideo'
-import type { SelectedVideo } from '../App'
+import { splitFileName } from '../export/naming'
+import type { AnalysisResult, FilmstripFrame } from '../video/analyzeVideo'
+import type { SourceVideo } from '../App'
 import { ClipSaver } from './ClipSaver'
 import { Icon } from './icons'
 import { formatDuration } from './labels'
-import type { RefObject } from 'react'
 import type { ExporterQueue } from './useClipExporter'
 
 interface Props {
-  video: SelectedVideo
-  duration: number
+  sources: SourceVideo[]
+  /** 動画ごとの解析結果（解析中・失敗は null） */
+  results: (AnalysisResult | null)[]
   chosen: NumberedClip[]
-  filmstrip: FilmstripFrame[]
-  frameAspect: number
+  /** まだ解析が終わっていない動画の本数（その動画のクリップは含まれない） */
+  pendingCount: number
   exporter: ExporterQueue
   /** 書き出し済みのファイル（画面を離れても持っておく） */
   cacheRef: RefObject<ReadonlyMap<string, File>>
@@ -34,9 +36,14 @@ function frameAt(filmstrip: FilmstripFrame[], time: number): FilmstripFrame | un
   return best
 }
 
-export function ExportScreen({ video, duration, chosen, filmstrip, frameAspect, exporter, cacheRef, busy, onBusyChange, onBack }: Props) {
+export function ExportScreen({ sources, results, chosen, pendingCount, exporter, cacheRef, busy, onBusyChange, onBack }: Props) {
   const totalSec = chosen.reduce((s, c) => s + (c.clip.end - c.clip.start), 0)
-  const totalBytes = chosen.reduce((s, c) => s + estimateClipBytes(c.clip, video.file.size, duration), 0)
+  const totalBytes = chosen.reduce(
+    (s, c) => s + estimateClipBytes(c.clip, sources[c.source].file.size, sources[c.source].duration),
+    0,
+  )
+  const frameAspect = results.find((r) => r)?.frameAspect ?? 1
+  const multi = sources.length > 1
 
   return (
     <section className="export">
@@ -49,28 +56,30 @@ export function ExportScreen({ video, duration, chosen, filmstrip, frameAspect, 
         </span>
         <span className="icon-button" aria-hidden="true" />
       </header>
+      {pendingCount > 0 && (
+        <p className="export-note" title="解析が終わった動画のクリップだけを保存します。解析が終わると、ここに加わります">
+          解析中の{pendingCount}本は含まれません
+        </p>
+      )}
 
       <ul className="export-grid" style={{ ['--aspect' as string]: frameAspect }}>
         {chosen.map((c) => {
-          const frame = frameAt(filmstrip, c.clip.start)
+          const frame = frameAt(results[c.source]?.filmstrip ?? [], c.clip.start)
+          const name = splitFileName(sources[c.source].file.name).base
           return (
-            <li key={c.number} title={`${formatDuration(c.clip.start)}〜${formatDuration(c.clip.end)}`}>
+            <li
+              key={`${c.source}:${c.number}`}
+              title={`${multi ? `${name} ` : ''}${formatDuration(c.clip.start)}〜${formatDuration(c.clip.end)}`}
+            >
               {frame && <img src={frame.url} alt="" draggable={false} />}
-              <span className="export-number">{c.number}</span>
+              <span className="export-number">{multi ? `${c.source + 1}-${c.number}` : c.number}</span>
               <span className="export-length">{formatDuration(c.clip.end - c.clip.start)}</span>
             </li>
           )
         })}
       </ul>
 
-      <ClipSaver
-        video={video}
-        duration={duration}
-        chosen={chosen}
-        exporter={exporter}
-        cacheRef={cacheRef}
-        onBusyChange={onBusyChange}
-      />
+      <ClipSaver sources={sources} chosen={chosen} exporter={exporter} cacheRef={cacheRef} onBusyChange={onBusyChange} />
     </section>
   )
 }

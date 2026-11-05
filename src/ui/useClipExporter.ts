@@ -10,7 +10,7 @@ export interface ExporterQueue {
   release(): void
 }
 
-export function useClipExporter(file: File): ExporterQueue {
+export function useClipExporter(files: readonly File[]): ExporterQueue {
   const exporterRef = useRef<Promise<ClipExporter> | null>(null)
   /** 前の処理が終わってから次を始めるための待ち行列の末尾 */
   const queueRef = useRef<Promise<unknown>>(Promise.resolve())
@@ -31,12 +31,12 @@ export function useClipExporter(file: File): ExporterQueue {
       disposedRef.current = true
       disposeExporter()
     }
-  }, [file, disposeExporter])
+  }, [files, disposeExporter])
 
   const getExporter = useCallback(() => {
     if (!exporterRef.current) {
       // ffmpeg.wasm は大きいので、使うときに読み込む
-      const created = import('../video/clipExporter').then(({ createClipExporter }) => createClipExporter(file))
+      const created = import('../video/clipExporter').then(({ createClipExporter }) => createClipExporter(files))
       exporterRef.current = created
       // 読み込みに失敗したら、次に使うときにやり直せるようにする
       created.catch(() => {
@@ -44,7 +44,7 @@ export function useClipExporter(file: File): ExporterQueue {
       })
     }
     return exporterRef.current
-  }, [file])
+  }, [files])
 
   const run = useCallback<ExporterQueue['run']>(
     (task) => {

@@ -10,6 +10,12 @@ import { clampZoom, fitZoom, timeToX, waveformColumns, xToTime } from '../timeli
 import type { FilmstripFrame } from '../video/analyzeVideo'
 import { formatDuration } from './labels'
 
+/** 解析が終わっていない（または失敗した）動画の範囲 */
+export interface PendingRange extends Interval {
+  label: string
+  title?: string
+}
+
 interface Props {
   duration: number
   samples: MotionSample[]
@@ -19,10 +25,14 @@ interface Props {
   clips: EditClip[]
   freezes: Interval[]
   excluded: Interval[]
+  /** 解析が終わっていない動画の範囲 */
+  pending: PendingRange[]
+  /** 動画のつなぎ目の時刻 */
+  boundaries: number[]
   startThreshold: number
   endThreshold: number
-  /** キーフレームの時刻（読み取り中・失敗時は null） */
-  keyframes: number[] | null
+  /** キーフレームの時刻（読めた動画の分だけ） */
+  keyframes: number[]
   currentTime: number
   selectedId: number | null
   /** なぞってスクロールした（その時刻へシークする。再生中なら止める） */
@@ -275,7 +285,7 @@ export function Timeline(props: Props) {
     props.onTrimEnd()
   }
 
-  const showKeyframes = keyframes !== null && pxPerSec >= TIMELINE.keyframeTickMinPxPerSec
+  const showKeyframes = pxPerSec >= TIMELINE.keyframeTickMinPxPerSec
 
   return (
     <div
@@ -306,6 +316,19 @@ export function Timeline(props: Props) {
             // 横スクロールしても表示領域の左端に留まる（position: sticky）。見えている範囲だけを描く
             style={{ top: TIMELINE.filmstripHeight, width: viewWidth, height: TIMELINE.waveformHeight }}
           />
+          {props.boundaries.map((t) => (
+            <span key={t} className="source-boundary" style={{ left: pad + timeToX(t, pxPerSec) }} />
+          ))}
+          {props.pending.map((p) => (
+            <span
+              key={p.start}
+              className="pending-range"
+              style={{ left: pad + timeToX(p.start, pxPerSec), width: timeToX(p.end - p.start, pxPerSec) }}
+              title={p.title}
+            >
+              <span>{p.label}</span>
+            </span>
+          ))}
           <div
             className="clip-track"
             style={{ top: TRACK_TOP, left: pad, width: trackWidth, height: TIMELINE.clipTrackHeight }}
