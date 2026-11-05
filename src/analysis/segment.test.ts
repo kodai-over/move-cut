@@ -3,7 +3,7 @@ import { buildClips, detectMotion, segmentMotion } from './segment'
 import type { MotionSample } from './types'
 import type { SegmentParams } from '../config'
 
-const FP = { startHoldSec: 0.3, freezeLookbackSec: 1, freezePeakRatio: 2, freezeMinTrunkDeg: 45, freezeMaxSec: 5 }
+const FP = { startHoldSec: 0.3, freezeLookbackSec: 1, freezePeakRatio: 2, freezeMinTrunkDeg: 45, freezeMinSec: 0.5, freezeMaxSec: 5 }
 const P: SegmentParams = {
   startThreshold: 0.1,
   endThreshold: 0.06,
@@ -106,6 +106,14 @@ describe('detectMotion', () => {
       expect(r.motions).toEqual([{ start: 1, end: 8 }])
     })
 
+    it('0.5秒未満の一瞬の傾きはフリーズにせず、静止はその時刻から数える', () => {
+      // 動き→体幹90度で0.3秒→起きて静止
+      const s = series([1, 0.02], [2, 0.25], [0.3, 0.02, 90], [3, 0.02, 0])
+      const r = detectMotion(s, P, FP)
+      expect(r.freezes).toEqual([])
+      expect(r.motions).toEqual([{ start: 1, end: 3 }])
+    })
+
     it('フリーズの後に動きが再開すれば区間は続く', () => {
       const s = series([1, 0.02], [2, 0.25], [3, 0.02, 90], [2, 0.2], [3, 0.02])
       const r = detectMotion(s, P, FP)
@@ -157,9 +165,15 @@ describe('buildClips', () => {
 })
 
 describe('segmentMotion', () => {
+  it('最後まで動いている区間は、最後のサンプルではなく動画の長さまで余白を付ける', () => {
+    const params = { ...P, marginAfterSec: 0.7 }
+    const s = series([1, 0.02], [2, 0.15])
+    expect(segmentMotion(s, 3.05, params, 'idea', FP).clips).toEqual([{ start: 1, end: 3.05 }])
+  })
+
   it('捨てた区間のフリーズは返さない', () => {
     const params = { ...P, minClipSec: 10 }
     const s = series([1, 0.02], [2, 0.25], [3, 0.02, 90], [3, 0.02, 0])
-    expect(segmentMotion(s, params, 'idea', FP)).toEqual({ clips: [], freezes: [] })
+    expect(segmentMotion(s, 10, params, 'idea', FP)).toEqual({ clips: [], freezes: [] })
   })
 })

@@ -69,7 +69,7 @@ const overlayPlugin: Plugin<'line', OverlayOptions> = {
     ctx.strokeStyle = CHART.thresholdColor
     ctx.lineWidth = 1
     hline(opts.startThreshold, [])
-    hline(opts.endThreshold, [4, 3])
+    hline(opts.endThreshold, [...CHART.endThresholdDash])
     ctx.restore()
   },
 }
@@ -196,5 +196,7 @@ export function MotionChart({ samples, currentTime, clips, freezes, startThresho
 
 function setOverlay(chart: Chart<'line', { x: number; y: number | null }[]>, overlay: OverlayOptions) {
   ;(chart.options.plugins as Record<string, unknown>).overlay = overlay
+  const y = chart.options.scales?.y
+  if (y) y.suggestedMax = overlay.startThreshold * CHART.scoreAxisHeadroom
   chart.update('none')
 }

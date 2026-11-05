@@ -62,10 +62,17 @@ export function detectMotion(
   /** 動き中：フリーズの開始時刻 */
   let freezeSince: number | null = null
 
-  const closeFreeze = (end: number) => {
-    if (freezeSince == null) return
-    freezes.push({ start: freezeSince, end })
+  /**
+   * フリーズを閉じる。freezeMinSec 未満の一瞬の傾きはフリーズとみなさず、
+   * 静止の始まりをフリーズ開始時刻に戻すため、その時刻を返す（フリーズとして残したら end を返す）
+   */
+  const closeFreeze = (end: number): number => {
+    const start = freezeSince
     freezeSince = null
+    if (start == null) return end
+    if (end - start < fp.freezeMinSec - eps) return start
+    freezes.push({ start, end })
+    return end
   }
 
   samples.forEach((s, i) => {
@@ -94,8 +101,7 @@ export function detectMotion(
       const withinMax = t - freezeSince + dt <= fp.freezeMaxSec + eps
       if (withinMax && isTilted(s, fp.freezeMinTrunkDeg)) return
       // 体幹が起きた・最大秒数を超えたらフリーズ終了。ここからは通常の静止として数える
-      closeFreeze(t)
-      lowSince = t
+      lowSince = closeFreeze(t)
     } else if (lowSince == null) {
       const isFreeze =
         isTilted(s, fp.freezeMinTrunkDeg) &&
@@ -117,8 +123,8 @@ export function detectMotion(
 
   if (moving && samples.length) {
     const last = samples[samples.length - 1].time
-    closeFreeze(last)
-    motions.push({ start: motionStart, end: lowSince ?? last })
+    const end = freezeSince != null ? closeFreeze(last) : (lowSince ?? last)
+    motions.push({ start: motionStart, end })
   }
   return { motions, freezes }
 }
@@ -145,14 +151,14 @@ export function buildClips(motions: Interval[], duration: number, params: Segmen
   return kept
 }
 
-/** 動きスコアの時系列から切り出し区間を求める（パラメータ変更時はこれだけをやり直す） */
+/** 動きスコアの時系列から切り出し区間を求める（パラメータ変更時はこれだけをやり直す）。duration は動画の長さ（秒） */
 export function segmentMotion(
   samples: MotionSample[],
+  duration: number,
   params: SegmentParams,
   mode: Mode,
   fp: FreezeParams = SEGMENT,
 ): SegmentResult {
-  const duration = samples.length ? samples[samples.length - 1].time : 0
   const { motions, freezes } = detectMotion(samples, params, fp)
   const clips = buildClips(motions, duration, params, mode)
   // 捨てた区間のフリーズは表示しない

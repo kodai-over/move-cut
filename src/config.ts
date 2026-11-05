@@ -57,6 +57,10 @@ export const CHART = {
   freezeColor: 'rgba(255, 159, 28, 0.35)',
   /** 開始閾値（実線）・終了閾値（破線）の色 */
   thresholdColor: 'rgba(47, 124, 246, 0.7)',
+  /** 終了閾値の破線の模様（線・間隔のpx） */
+  endThresholdDash: [4, 3],
+  /** スコア軸の上限を、開始閾値のこの倍率以上にする（閾値線が枠外に消えないように） */
+  scoreAxisHeadroom: 1.2,
 } as const
 
 /** 区間の切り出し（ステップ2）のうち、スライダーで変えるパラメータ */
@@ -80,7 +84,7 @@ export interface SegmentParams {
 /** 開始閾値の初期値。フェーズ1の実動画で静止 0.02〜0.06・ダンス 0.08〜0.18 だったため 0.08 とする */
 const START_THRESHOLD = 0.08
 /** 終了閾値は開始閾値のこの割合 */
-export const END_THRESHOLD_RATIO = 0.6
+const END_THRESHOLD_RATIO = 0.6
 
 /** モード別のパラメータ初期値 */
 export const SEGMENT_DEFAULTS = {
@@ -114,13 +118,15 @@ export const SEGMENT = {
   freezePeakRatio: 2,
   /** フリーズ判定：体幹の鉛直からの傾きの下限（度） */
   freezeMinTrunkDeg: 45,
+  /** これより短い傾きはフリーズとみなさない（秒） */
+  freezeMinSec: 0.5,
   /** フリーズとして区間に含める最大秒数 */
   freezeMaxSec: 5.0,
 } as const
 
 /** スライダーの範囲と刻み */
 export const SLIDER = {
-  threshold: { min: 0.01, max: 0.3, step: 0.005 },
+  threshold: { min: 0.005, max: 0.3, step: 0.001 },
   stillSec: { min: 0.5, max: 10, step: 0.5 },
   marginSec: { min: 0, max: 3, step: 0.1 },
 } as const

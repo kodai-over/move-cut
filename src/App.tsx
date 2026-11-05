@@ -16,7 +16,7 @@ export interface SelectedVideo {
 type State =
   | { screen: 'select'; error?: string }
   | { screen: 'analyzing'; progress: number }
-  | { screen: 'result'; samples: MotionSample[] }
+  | { screen: 'result'; samples: MotionSample[]; duration: number }
 
 function App() {
   const [state, setState] = useState<State>({ screen: 'select' })
@@ -42,11 +42,11 @@ function App() {
     setState({ screen: 'analyzing', progress: 0 })
     const release = await keepScreenAwake()
     try {
-      const samples = await analyzeVideo(video.url, {
+      const { samples, duration } = await analyzeVideo(video.url, {
         signal: controller.signal,
         onProgress: (progress) => setState({ screen: 'analyzing', progress }),
       })
-      setState({ screen: 'result', samples })
+      setState({ screen: 'result', samples, duration })
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
         setState({ screen: 'select' })
@@ -80,7 +80,12 @@ function App() {
         <AnalyzingScreen progress={state.progress} onCancel={() => abortRef.current?.abort()} />
       )}
       {state.screen === 'result' && video && (
-        <ResultScreen video={video} mode={mode} samples={state.samples} onBack={() => setState({ screen: 'select' })} />
+        <ResultScreen
+          video={video}
+          mode={mode}
+          samples={state.samples}
+          duration={state.duration}
+          onBack={() => setState({ screen: 'select' })} />
       )}
     </main>
   )

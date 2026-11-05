@@ -14,17 +14,19 @@ interface Props {
   video: SelectedVideo
   mode: Mode
   samples: MotionSample[]
+  /** 動画の長さ（秒）。区間の末尾をこの範囲に収める */
+  duration: number
   onBack: () => void
 }
 
-export function ResultScreen({ video, mode, samples, onBack }: Props) {
+export function ResultScreen({ video, mode, samples, duration, onBack }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [currentTime, setCurrentTime] = useState(0)
   /** 最後にタップされた時刻（初回の再生準備中に続けてタップされた場合も最新を使う） */
   const pendingSeekRef = useRef(0)
   const [params, setParams] = useState<SegmentParams>(SEGMENT_DEFAULTS[mode])
   // 解析はやり直さず、区間の計算だけをやり直す
-  const { clips, freezes } = useMemo(() => segmentMotion(samples, params, mode), [samples, params, mode])
+  const { clips, freezes } = useMemo(() => segmentMotion(samples, duration, params, mode), [samples, duration, params, mode])
   const totalSec = clips.reduce((sum, c) => sum + (c.end - c.start), 0)
 
   const seek = (time: number) => {
