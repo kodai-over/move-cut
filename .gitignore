@@ -1,0 +1,20 @@
+# 依存・ビルド成果物
+node_modules/
+dist/
+dev-dist/
+coverage/
+
+# 練習動画（公開リポジトリに上げない）
+samples/
+*.mov
+*.MOV
+*.mp4
+*.MP4
+
+# 環境・ローカル設定
+.env
+.env.*
+.DS_Store
+*.log
+.claude/settings.local.json
+.claude/worktrees/
