@@ -136,6 +136,9 @@ describe('movingAverage', () => {
   it('中心化した窓で平均し、端は窓を縮める', () => {
     expect(movingAverage([0, 0, 10, 0, 0], 3)).toEqual([0, 10 / 3, 10 / 3, 10 / 3, 0])
   })
+  it('偶数の窓幅は奇数に切り下げる', () => {
+    expect(movingAverage([0, 0, 9, 0, 0], 4)).toEqual([0, 3, 3, 3, 0])
+  })
   it('窓幅1は元の値のまま', () => {
     expect(movingAverage([1, 2, 3], 1)).toEqual([1, 2, 3])
   })

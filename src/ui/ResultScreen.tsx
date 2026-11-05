@@ -39,7 +39,6 @@ export function ResultScreen({ video, mode, samples, onBack }: Props) {
         src={video.url}
         controls
         playsInline
-        muted
         onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
       />
 

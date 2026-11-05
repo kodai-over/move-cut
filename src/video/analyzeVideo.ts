@@ -2,7 +2,15 @@
 import { ANALYSIS } from '../config'
 import { boundingBox, buildMotionSeries, diffRatio, expandBox, selectMainPose, toGrayscale } from '../analysis/motion'
 import type { FrameObservation, MotionSample, Pose } from '../analysis/types'
-import { UserFacingError, analysisSize, createVideoElement, loadVideoInfo, sampleTimes, seekTo } from './videoFile'
+import {
+  UserFacingError,
+  analysisSize,
+  createVideoElement,
+  loadVideoInfo,
+  prepareForFrameCapture,
+  sampleTimes,
+  seekTo,
+} from './videoFile'
 
 export interface AnalyzeOptions {
   onProgress?: (ratio: number) => void
@@ -30,6 +38,7 @@ export async function analyzeVideo(url: string, opts: AnalyzeOptions = {}): Prom
     throw new UserFacingError('骨格推定モデルの読み込みに失敗しました。通信状況を確認して、もう一度お試しください。')
   }
 
+  const detach = await prepareForFrameCapture(video)
   try {
     const times = sampleTimes(info.duration)
     const frames: FrameObservation[] = []
@@ -62,6 +71,7 @@ export async function analyzeVideo(url: string, opts: AnalyzeOptions = {}): Prom
     return buildMotionSeries(frames)
   } finally {
     detector.close()
+    detach()
     video.removeAttribute('src')
     video.load()
   }

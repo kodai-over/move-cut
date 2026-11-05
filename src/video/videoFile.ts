@@ -20,6 +20,31 @@ export function createVideoElement(url: string): HTMLVideoElement {
   return video
 }
 
+/**
+ * フレームを canvas に描けるよう準備する
+ * iOS Safari は DOM 外・未再生の video をデコードしないことがあるため、不可視で DOM に置き、一度再生して止める
+ * 戻り値の関数で DOM から外す
+ */
+export async function prepareForFrameCapture(video: HTMLVideoElement): Promise<() => void> {
+  Object.assign(video.style, {
+    position: 'fixed',
+    left: '0',
+    top: '0',
+    width: '1px',
+    height: '1px',
+    opacity: '0',
+    pointerEvents: 'none',
+  })
+  document.body.appendChild(video)
+  try {
+    await video.play()
+  } catch {
+    // 自動再生が拒否されても seek で描画できる環境があるため続行する
+  }
+  video.pause()
+  return () => video.remove()
+}
+
 /** メタデータ（長さ・解像度）を読み込む。非対応形式ならエラー */
 export function loadVideoInfo(video: HTMLVideoElement): Promise<VideoInfo> {
   return new Promise((resolve, reject) => {
@@ -96,5 +121,5 @@ export function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
 /** 解析する時刻の一覧（0秒から sampleFps 間隔、終端は含まない） */
 export function sampleTimes(duration: number, fps: number = ANALYSIS.sampleFps): number[] {
   const n = Math.ceil(duration * fps)
-  return Array.from({ length: n }, (_, i) => i / fps).filter((t) => t < duration)
+  return Array.from({ length: n }, (_, i) => i / fps)
 }

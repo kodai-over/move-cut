@@ -174,9 +174,9 @@ export function diffRatio(
   return total > 0 ? changed / total : 0
 }
 
-/** 中心化した移動平均（窓幅 window フレーム、端は窓を縮める） */
+/** 中心化した移動平均（窓幅 window フレーム。偶数は奇数に切り下げる。端は窓を縮める） */
 export function movingAverage(values: readonly number[], window: number): number[] {
-  const half = Math.floor(Math.max(1, window) / 2)
+  const half = Math.floor((Math.max(1, window) - 1) / 2)
   const out: number[] = new Array(values.length)
   for (let i = 0; i < values.length; i++) {
     const from = Math.max(0, i - half)
