@@ -81,9 +81,11 @@ export function SelectScreen({ videos, error, autoStart, onSelectFiles, onStart,
     })
     if (ok.length === 0) return
     const warnings = [...new Set(ok.flatMap((v) => supportWarnings(v.info)))]
+    const skipped = results.length - ok.length
+    if (skipped > 0) warnings.unshift(`${skipped}本は読み込めないので飛ばします。`)
     if (warnings.length > 0) {
       const confirmed = window.confirm(
-        `${warnings.join('\n')}\n正式サポート外のため、解析が遅い・途中で止まる可能性があります。続けますか？`,
+        `${warnings.join('\n')}\n${skipped < warnings.length ? '正式サポート外のため、解析が遅い・途中で止まる可能性があります。' : ''}続けますか？`,
       )
       if (!confirmed) {
         onDecline()

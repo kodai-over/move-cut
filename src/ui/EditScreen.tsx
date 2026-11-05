@@ -52,7 +52,8 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
   /** クリップだけを再生中なら、そのクリップの番号（終わりで止める） */
   const [playingClipId, setPlayingClipId] = useState<number | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [view, setView] = useState<'edit' | 'export'>('edit')
+  /** 書き出し画面を開いたときの残すクリップ（開いている間に解析が終わっても変えない。分けて保存している途中で回がやり直しにならないように） */
+  const [exportSnapshot, setExportSnapshot] = useState<{ chosen: NumberedClip[]; pendingCount: number } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   /** 動画ごとのキーフレームの時刻（読めなかったら null。吸着させない） */
@@ -87,11 +88,10 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
       return { params, bySource: new Map([...base, ...updates]) }
     })
 
-  // タイムラインに出すもの（全体の時刻）
+  // タイムラインに出すもの（全体の時刻）。スライダーで変わらないものは解析結果が増えたときだけ作り直す
   const timeline = useMemo(() => {
     const samples: MotionSample[] = []
     const filmstrip: FilmstripFrame[] = []
-    const freezes: Interval[] = []
     const excluded: Interval[] = []
     const pending: PendingRange[] = []
     results.forEach((r, i) => {
@@ -104,11 +104,14 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
       }
       samples.push(...shiftTimes(r.samples, offset))
       filmstrip.push(...shiftTimes(r.filmstrip, offset))
-      freezes.push(...shiftIntervals(segments[i]?.freezes ?? [], offset))
       excluded.push(...shiftIntervals(excludedIntervals(r.samples), offset))
     })
-    return { samples, filmstrip, freezes, excluded, pending }
-  }, [results, analyses, offsets, durations, segments])
+    return { samples, filmstrip, excluded, pending }
+  }, [results, analyses, offsets, durations])
+  const freezes = useMemo(
+    () => segments.flatMap((s, i) => shiftIntervals(s?.freezes ?? [], offsets[i])),
+    [segments, offsets],
+  )
   const frameAspect = results.find((r) => r)?.frameAspect ?? 1
   const clips = useMemo(
     () =>
@@ -134,8 +137,9 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
   const files = useMemo(() => sources.map((s) => s.file), [sources])
   const exporter = useClipExporter(files)
 
-  // キーフレームの時刻を動画ごとに順に読む（開始のつまみの吸着用）。読み終えたら ffmpeg.wasm を終了してメモリを空ける
-  const nextKeyframeSource = sources.findIndex((_, i) => !keyframes.has(i))
+  // キーフレームの時刻を、解析が終わった動画から順に読む（開始のつまみの吸着用。クリップがない動画には要らない）。
+  // 読み終えたら ffmpeg.wasm を終了してメモリを空ける
+  const nextKeyframeSource = results.findIndex((r, i) => r !== null && !keyframes.has(i))
   useEffect(() => {
     if (busy) return
     if (nextKeyframeSource < 0) {
@@ -187,6 +191,8 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
   /** プレビューを index 本目の動画に切り替え、読み込めたら local へシークする（play なら続けて再生する） */
   const switchTo = (index: number, local: number, play: boolean) => {
     switchRef.current = { local, play }
+    // 読み込み直す間に毎フレームの読み取りが新しい動画の先頭の時刻を書き込まないよう、先に止める
+    videoRef.current?.pause()
     setActive(index)
   }
 
@@ -243,6 +249,12 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
 
   // 動画の終わりまで再生したら、次の動画を続けて再生する
   const onEnded = () => {
+    // クリップだけを再生していたら、クリップの終わり（＝動画の終わり）で止める
+    if (playingClipId !== null) {
+      setPlayingClipId(null)
+      setCurrentTime(offsets[active] + durations[active])
+      return
+    }
     if (active >= last) return
     setCurrentTime(offsets[active + 1])
     switchTo(active + 1, 0, true)
@@ -272,7 +284,7 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
     }
     setPlayingClipId(null)
     // 最後まで再生し終えていたら、先頭から再生し直す
-    if (currentTime >= total - PREVIEW.restartNearEndSec) {
+    if ((active === last && el.ended) || currentTime >= total - PREVIEW.restartNearEndSec) {
       setCurrentTime(0)
       if (active !== 0) {
         switchTo(0, 0, true)
@@ -308,8 +320,13 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
     setSourceClips(new Map([[source, list.map((c) => (c.id === localId ? { ...c, keep: !c.keep } : c))]]))
   }
 
+  // 解析中の動画には手を付けない（空のクリップで上書きすると、解析が終わっても区間が出なくなる）
   const setAll = (keep: boolean) =>
-    setSourceClips(new Map(sourceClips.map((list, i) => [i, list.map((c) => ({ ...c, keep }))])))
+    setSourceClips(
+      new Map(
+        sourceClips.flatMap((list, i) => (results[i] ? [[i, list.map((c) => ({ ...c, keep }))] as const] : [])),
+      ),
+    )
 
   // つまみのドラッグ。動かし始めたときのクリップを元に毎回計算する（縮め戻せば合体も元に戻る）
   const trimRef = useRef<{ source: number; snapshot: EditClip[]; localId: number; edge: ClipEdge; time: number } | null>(
@@ -364,18 +381,18 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
 
   const pendingCount = analyses.filter((a) => a.status === 'pending').length
 
-  if (view === 'export') {
+  if (exportSnapshot) {
     return (
       <ExportScreen
         sources={sources}
         results={results}
-        chosen={chosen}
-        pendingCount={pendingCount}
+        chosen={exportSnapshot.chosen}
+        pendingCount={exportSnapshot.pendingCount}
         exporter={exporter}
         cacheRef={exportCacheRef}
         busy={busy}
         onBusyChange={setBusy}
-        onBack={() => setView('edit')}
+        onBack={() => setExportSnapshot(null)}
       />
     )
   }
@@ -407,7 +424,7 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
             className="pill"
             onClick={() => {
               stop()
-              setView('export')
+              setExportSnapshot({ chosen, pendingCount })
             }}
             disabled={chosen.length === 0}
             title={chosen.length === 0 ? '残すクリップがありません' : `残す${chosen.length}本を書き出す`}
@@ -423,7 +440,7 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
         filmstrip={timeline.filmstrip}
         frameAspect={frameAspect}
         clips={clips}
-        freezes={timeline.freezes}
+        freezes={freezes}
         excluded={timeline.excluded}
         pending={timeline.pending}
         boundaries={offsets.slice(1)}

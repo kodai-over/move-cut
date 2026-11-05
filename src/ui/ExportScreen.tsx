@@ -57,7 +57,7 @@ export function ExportScreen({ sources, results, chosen, pendingCount, exporter,
         <span className="icon-button" aria-hidden="true" />
       </header>
       {pendingCount > 0 && (
-        <p className="export-note" title="解析が終わった動画のクリップだけを保存します。解析が終わると、ここに加わります">
+        <p className="export-note" title="解析が終わった動画のクリップだけを保存します。解析が終わってから編集に戻って開き直すと加わります">
           解析中の{pendingCount}本は含まれません
         </p>
       )}

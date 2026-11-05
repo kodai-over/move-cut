@@ -204,12 +204,14 @@ export function Timeline(props: Props) {
     ctx.strokeStyle = CHART.scoreColor
     ctx.lineWidth = 1.5
     ctx.beginPath()
-    let drawing = false
+    // 解析中の動画をはさむなど、サンプルが大きく離れているところは線をつなげない
+    const breakPx = CHART.lineBreakGapSec * pxPerSec
+    let lastX: number | null = null
     cols.forEach((v, x) => {
       if (v === null) return
-      if (drawing) ctx.lineTo(x + left, y(v))
+      if (lastX !== null && x - lastX <= breakPx) ctx.lineTo(x + left, y(v))
       else ctx.moveTo(x + left, y(v))
-      drawing = true
+      lastX = x
     })
     ctx.stroke()
   }, [viewWidth, pad, pxPerSec, duration, sampleTimes, scores, maxScore, props.excluded, props.freezes, props.startThreshold, props.endThreshold])
