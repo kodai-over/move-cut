@@ -61,12 +61,10 @@ export const ASSETS = {
 /** ダウンロード用の Object URL を解放するまでの待ち時間（ミリ秒）。iOS Safari は即時解放すると保存に失敗することがある */
 export const DOWNLOAD_URL_REVOKE_DELAY_MS = 10_000
 
-/** グラフ表示 */
+/** タイムラインの波形の表示 */
 export const CHART = {
-  /** 体幹角度の軸の最大値（度） */
-  trunkAngleMaxDeg: 180,
-  /** 切り出し区間の帯の色 */
-  clipColor: 'rgba(47, 124, 246, 0.14)',
+  /** 動きスコアの線の色 */
+  scoreColor: '#2f7cf6',
   /** フリーズ区間の帯の色 */
   freezeColor: 'rgba(255, 159, 28, 0.35)',
   /** 動きとして数えなかった時間（カメラ付近・本人検出前後）の帯の色 */
@@ -165,10 +163,24 @@ export const EXPORT = {
    * 超える場合は何回かに分けて書き出し・保存する。1本でこれを超えるクリップは単独で渡す
    */
   maxBatchBytes: 400 * 1024 * 1024,
-  /** サムネイルの幅（px） */
-  thumbnailWidth: 160,
-  /** サムネイルに使う時刻（クリップ開始からの秒数。余白の分だけ後ろにずらす） */
-  thumbnailOffsetSec: 0.7,
-  /** サムネイルのJPEG画質（0〜1） */
-  thumbnailQuality: 0.7,
+} as const
+
+/** タイムライン編集画面（フェーズ5〜） */
+export const TIMELINE = {
+  /** コマの帯に使うコマの間隔（秒）。解析中に取り出したコマから間引いて保存する */
+  filmstripIntervalSec: 1,
+  /** コマの帯の高さ（px）。保存するコマもこの高さに縮小する */
+  filmstripHeight: 48,
+  /** 保存するコマのJPEG画質（0〜1） */
+  filmstripQuality: 0.6,
+  /** 波形の高さ（px） */
+  waveformHeight: 56,
+  /** 区間の帯の高さ（px） */
+  clipTrackHeight: 28,
+  /** 最大の拡大率（1秒あたりのpx） */
+  maxPxPerSec: 240,
+  /** 拡大・縮小ボタン1回の倍率 */
+  zoomStep: 2,
+  /** キーフレームの目盛りを表示する拡大率（1秒あたりのpx）。これより縮小しているときは目盛りが詰まるので出さない */
+  keyframeTickMinPxPerSec: 20,
 } as const

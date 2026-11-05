@@ -3,6 +3,7 @@
 import { FFFSType, FFmpeg } from '@ffmpeg/ffmpeg'
 import { ASSETS } from '../config'
 import { clipFileName, cutArgs, videoMimeType } from '../export/naming'
+import { parseKeyframeTimes } from '../export/keyframes'
 import type { Interval } from '../analysis/segment'
 import { UserFacingError } from './videoFile'
 
@@ -11,6 +12,8 @@ const INPUT_DIR = '/input'
 export interface ClipExporter {
   /** 区間を切り出して File にする。index は1始まりの連番（ファイル名に使う） */
   exportClip(clip: Interval, index: number): Promise<File>
+  /** 元動画の映像のキーフレームの時刻（秒、昇順）。パケット情報だけを読み、映像はデコードしない */
+  keyframeTimes(): Promise<number[]>
   /** マウントを外し、ワーカーを終了する */
   dispose(): Promise<void>
 }
@@ -51,6 +54,29 @@ export async function createClipExporter(source: File): Promise<ClipExporter> {
       if (typeof data === 'string') throw new UserFacingError('動画の切り出しに失敗しました。')
       // シングルスレッド版のため中身は通常の ArrayBuffer（SharedArrayBuffer ではない）
       return new File([data as Uint8Array<ArrayBuffer>], name, { type: videoMimeType(name) })
+    },
+    async keyframeTimes() {
+      const out = 'keyframes.csv'
+      // ffmpeg.wasm の ffprobe は成功しても終了コードが 0 にならないことがあるため、出力ファイルの中身で判定する
+      await ffmpeg.ffprobe([
+        '-v', 'error',
+        '-select_streams', 'v:0',
+        '-show_entries', 'packet=pts_time,flags',
+        '-of', 'csv=p=0',
+        inputPath,
+        '-o', out,
+      ])
+      let text = ''
+      try {
+        const data = await ffmpeg.readFile(out, 'utf8')
+        text = typeof data === 'string' ? data : new TextDecoder().decode(data)
+        await ffmpeg.deleteFile(out)
+      } catch {
+        // 出力がなければ下で失敗にする
+      }
+      const times = parseKeyframeTimes(text)
+      if (times.length === 0) throw new UserFacingError('動画のキーフレームを読み取れませんでした。')
+      return times
     },
     async dispose() {
       try {

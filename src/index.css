@@ -215,15 +215,6 @@ progress {
   background: #000;
 }
 
-.chart {
-  position: relative;
-  height: 240px;
-  padding: 8px 4px;
-  border-radius: 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-}
-
 .actions {
   display: flex;
   flex-direction: column;
@@ -233,28 +224,6 @@ progress {
 .summary {
   margin: 0;
   font-size: 15px;
-}
-
-.clip-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.clip-chip {
-  min-height: 36px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
 }
 
 .sliders {
@@ -303,79 +272,213 @@ progress {
   background: var(--success-bg);
 }
 
-.select-all {
-  display: flex;
-  gap: 8px;
-}
-
-.select-all .button {
-  min-height: 36px;
-  padding: 0 10px;
-  font-size: 14px;
-}
-
-.clip-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.clip-card {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 10px;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
-  opacity: 0.55;
-}
-
-.clip-card.selected {
-  opacity: 1;
-}
-
-.clip-card.playing {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
-.clip-thumb {
-  display: flex;
-  justify-content: center;
-  min-width: 48px;
-  max-width: 120px;
-  height: 72px;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #000;
-  cursor: pointer;
-}
-
-.clip-thumb img {
-  display: block;
-  height: 100%;
-  width: auto;
-}
-
-/* 縦長・横長どちらの動画も切らずに表示する。読み込み中は縦長の枠を出す */
-.thumb-placeholder {
-  display: block;
-  width: 48px;
-  height: 100%;
-}
-
 .clip-info {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.banner-action {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* 編集画面のタイムライン */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.timeline-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.timeline-time {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.timeline-zoom {
+  display: flex;
+  gap: 6px;
+}
+
+.timeline-zoom button {
+  min-width: 44px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.timeline-zoom button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.timeline-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+}
+
+.timeline-content {
+  position: relative;
+}
+
+.filmstrip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.filmstrip img {
+  position: absolute;
+  top: 0;
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* 横スクロールしても表示領域の左端に留まり、見えている範囲だけを描く */
+.waveform {
+  display: block;
+  position: sticky;
+  left: 0;
+  pointer-events: none;
+}
+
+.clip-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--border);
+}
+
+.clip-band {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  padding: 0;
+  border: 1px dashed var(--muted);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.clip-band.keep {
+  border: 0;
+  background: rgba(47, 124, 246, 0.3);
+  color: var(--text);
+}
+
+.clip-band.selected {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.keyframe-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 5px;
+  background: var(--muted);
+  pointer-events: none;
+}
+
+.playhead {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #ff5a36;
+  pointer-events: none;
+}
+
+.clip-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.clip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  opacity: 0.55;
+}
+
+.clip-row.keep {
+  opacity: 1;
+}
+
+.clip-row.selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.clip-row-play {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 44px;
   padding: 0;
   border: 0;
   background: none;
@@ -412,27 +515,24 @@ progress {
   accent-color: var(--accent);
 }
 
-.banner {
+.select-all {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  margin: 0 0 14px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+}
+
+.select-all .summary {
+  flex: 1;
+}
+
+.select-all .button {
+  min-height: 36px;
+  padding: 0 10px;
   font-size: 14px;
 }
 
-.banner-action {
-  min-height: 36px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--accent);
-  color: var(--accent-text);
-  font: inherit;
-  font-weight: 600;
+.suggest-settings summary {
+  padding: 8px 0;
+  color: var(--muted);
   cursor: pointer;
 }

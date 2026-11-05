@@ -1,5 +1,5 @@
 // 動画1本を解析して動きスコアの時系列を返す（フレーム取得 → 骨格推定 → 差分 → 統合）
-import { ANALYSIS } from '../config'
+import { ANALYSIS, TIMELINE } from '../config'
 import { boundingBox, buildMotionSeries, diffRatio, expandBox, toGrayscale } from '../analysis/motion'
 import { INITIAL_TRACK_STATE, trackMainPose } from '../analysis/tracking'
 import type { FrameObservation, MotionSample } from '../analysis/types'
@@ -18,10 +18,22 @@ export interface AnalyzeOptions {
   signal?: AbortSignal
 }
 
+/** タイムラインのコマの帯に使う、縮小したコマ */
+export interface FilmstripFrame {
+  /** 時刻（秒） */
+  time: number
+  /** JPEG の data URL */
+  url: string
+}
+
 /** 解析結果。duration は動画の長さ（秒） */
 export interface AnalysisResult {
   samples: MotionSample[]
   duration: number
+  /** コマの帯（TIMELINE.filmstripIntervalSec 間隔） */
+  filmstrip: FilmstripFrame[]
+  /** コマの縦横比（幅÷高さ） */
+  frameAspect: number
 }
 
 export async function analyzeVideo(url: string, opts: AnalyzeOptions = {}): Promise<AnalysisResult> {
@@ -45,6 +57,14 @@ export async function analyzeVideo(url: string, opts: AnalyzeOptions = {}): Prom
     throw new UserFacingError('骨格推定モデルの読み込みに失敗しました。通信状況を確認して、もう一度お試しください。')
   }
 
+  // コマの帯用：解析で描いたコマを縮小して保存する（動画を読み直さずに済むように）
+  const thumb = document.createElement('canvas')
+  thumb.height = TIMELINE.filmstripHeight
+  thumb.width = Math.round((width / height) * TIMELINE.filmstripHeight)
+  const thumbCtx = thumb.getContext('2d')
+  const filmstrip: FilmstripFrame[] = []
+  let nextFilmstripTime = 0
+
   const detach = await prepareForFrameCapture(video)
   try {
     const times = sampleTimes(info.duration)
@@ -58,6 +78,11 @@ export async function analyzeVideo(url: string, opts: AnalyzeOptions = {}): Prom
       const time = times[i]
       await seekTo(video, time)
       ctx.drawImage(video, 0, 0, width, height)
+      if (thumbCtx && time + 1e-6 >= nextFilmstripTime) {
+        thumbCtx.drawImage(canvas, 0, 0, thumb.width, thumb.height)
+        filmstrip.push({ time, url: thumb.toDataURL('image/jpeg', TIMELINE.filmstripQuality) })
+        nextFilmstripTime = time + TIMELINE.filmstripIntervalSec
+      }
       const gray = toGrayscale(ctx.getImageData(0, 0, width, height).data)
 
       const poses = detector.detect(canvas, Math.round(time * 1000))
@@ -86,7 +111,7 @@ export async function analyzeVideo(url: string, opts: AnalyzeOptions = {}): Prom
     }
 
     if (frames.length === 0) throw new UserFacingError('解析できるフレームがありませんでした。動画が短すぎる可能性があります。')
-    return { samples: buildMotionSeries(frames), duration: info.duration }
+    return { samples: buildMotionSeries(frames), duration: info.duration, filmstrip, frameAspect: width / height }
   } finally {
     detector.close()
     detach()
