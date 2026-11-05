@@ -17,11 +17,14 @@ interface Props {
 export function ResultScreen({ video, mode, samples, onBack }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [currentTime, setCurrentTime] = useState(0)
+  /** 最後にタップされた時刻（初回の再生準備中に続けてタップされた場合も最新を使う） */
+  const pendingSeekRef = useRef(0)
 
   const seek = (time: number) => {
     const el = videoRef.current
     if (!el) return
     setCurrentTime(time)
+    pendingSeekRef.current = time
     if (el.played.length > 0 || !el.paused) {
       el.currentTime = time
       return
@@ -37,7 +40,7 @@ export function ResultScreen({ video, mode, samples, onBack }: Props) {
       })
       .finally(() => {
         el.muted = wasMuted
-        el.currentTime = time
+        el.currentTime = pendingSeekRef.current
       })
   }
 
