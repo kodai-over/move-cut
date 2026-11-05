@@ -2,6 +2,7 @@
 // クリップ一覧画面を作るまでの仮のUI
 import { useState } from 'react'
 import type { Interval } from '../analysis/segment'
+import type { ClipExporter } from '../video/clipExporter'
 import { UserFacingError } from '../video/videoFile'
 import { keepScreenAwake, saveFiles } from './browser'
 import { formatDuration } from './labels'
@@ -14,7 +15,7 @@ interface Props {
 
 type State =
   | { step: 'idle' }
-  | { step: 'exporting'; progress: number | null }
+  | { step: 'exporting' }
   | { step: 'ready'; file: File; elapsedSec: number }
   | { step: 'error'; message: string }
 
@@ -25,16 +26,16 @@ export function ExportCheck({ source, clip, index }: Props) {
   const [saveResult, setSaveResult] = useState<string | null>(null)
 
   const exportClip = async () => {
-    setState({ step: 'exporting', progress: null })
+    setState({ step: 'exporting' })
     setSaveResult(null)
     const release = await keepScreenAwake()
     const startedAt = performance.now()
-    let exporter: Awaited<ReturnType<typeof import('../video/clipExporter').createClipExporter>> | null = null
+    let exporter: ClipExporter | null = null
     try {
       // ffmpeg.wasm は大きいので書き出し時に読み込む
       const { createClipExporter } = await import('../video/clipExporter')
       exporter = await createClipExporter(source)
-      const file = await exporter.exportClip(clip, index, (progress) => setState({ step: 'exporting', progress }))
+      const file = await exporter.exportClip(clip, index)
       setState({ step: 'ready', file, elapsedSec: (performance.now() - startedAt) / 1000 })
     } catch (e) {
       console.error(e)
@@ -65,8 +66,7 @@ export function ExportCheck({ source, clip, index }: Props) {
       </p>
       {state.step === 'exporting' ? (
         <p className="message warning" aria-live="polite">
-          書き出し中…{state.progress != null ? ` ${Math.round(state.progress * 100)}%` : ''}
-          （画面を閉じないでください）
+          書き出し中…（画面を閉じないでください）
         </p>
       ) : (
         <button className="button secondary" onClick={exportClip}>

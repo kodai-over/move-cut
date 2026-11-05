@@ -110,7 +110,10 @@ export function ResultScreen({ video, mode, samples, duration, onBack }: Props) 
         </ol>
       )}
 
-      {clips.length > 0 && <ExportCheck source={video.file} clip={clips[0]} index={1} />}
+      {clips.length > 0 && (
+        // 区間が変わったら書き出し済みのファイルを捨てる（古い区間を保存しないため）
+        <ExportCheck key={`${clips[0].start}-${clips[0].end}`} source={video.file} clip={clips[0]} index={1} />
+      )}
 
       <ParamSliders params={params} onChange={setParams} onReset={() => setParams(SEGMENT_DEFAULTS[mode])} />
 

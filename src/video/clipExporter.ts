@@ -10,7 +10,7 @@ const INPUT_DIR = '/input'
 
 export interface ClipExporter {
   /** 区間を切り出して File にする。index は1始まりの連番（ファイル名に使う） */
-  exportClip(clip: Interval, index: number, onProgress?: (ratio: number) => void): Promise<File>
+  exportClip(clip: Interval, index: number): Promise<File>
   /** マウントを外し、ワーカーを終了する */
   dispose(): Promise<void>
 }
@@ -29,29 +29,28 @@ export async function createClipExporter(source: File): Promise<ClipExporter> {
     ffmpeg.terminate()
     throw new UserFacingError('書き出し機能の読み込みに失敗しました。通信状況を確認して、もう一度お試しください。')
   }
-  await ffmpeg.createDir(INPUT_DIR)
-  await ffmpeg.mount(FFFSType.WORKERFS, { files: [source] }, INPUT_DIR)
+  try {
+    await ffmpeg.createDir(INPUT_DIR)
+    await ffmpeg.mount(FFFSType.WORKERFS, { files: [source] }, INPUT_DIR)
+  } catch (e) {
+    console.error(e)
+    ffmpeg.terminate()
+    throw new UserFacingError('動画ファイルを読み込めませんでした。')
+  }
   const inputPath = `${INPUT_DIR}/${source.name}`
 
   return {
-    async exportClip(clip, index, onProgress) {
+    // ffmpeg.wasm の進捗イベントは入力全体の長さに対する割合で、区間の切り出しでは当てにならないため使わない
+    async exportClip(clip, index) {
       const name = clipFileName(source.name, index, clip.start)
-      const handler = ({ progress }: { progress: number }) => {
-        if (Number.isFinite(progress)) onProgress?.(Math.min(1, Math.max(0, progress)))
-      }
-      ffmpeg.on('progress', handler)
-      try {
-        const code = await ffmpeg.exec(cutArgs(inputPath, name, clip.start, clip.end))
-        if (code !== 0) throw new UserFacingError('動画の切り出しに失敗しました。')
-        const data = await ffmpeg.readFile(name)
-        if (typeof data === 'string') throw new UserFacingError('動画の切り出しに失敗しました。')
-        // 書き出し後は ffmpeg 内のファイルを消してメモリを空ける
-        await ffmpeg.deleteFile(name)
-        // シングルスレッド版のため中身は通常の ArrayBuffer（SharedArrayBuffer ではない）
-        return new File([data as Uint8Array<ArrayBuffer>], name, { type: videoMimeType(name) })
-      } finally {
-        ffmpeg.off('progress', handler)
-      }
+      const code = await ffmpeg.exec(cutArgs(inputPath, name, clip.start, clip.end))
+      if (code !== 0) throw new UserFacingError('動画の切り出しに失敗しました。')
+      const data = await ffmpeg.readFile(name)
+      // 書き出し後は ffmpeg 内のファイルを消してメモリを空ける
+      await ffmpeg.deleteFile(name)
+      if (typeof data === 'string') throw new UserFacingError('動画の切り出しに失敗しました。')
+      // シングルスレッド版のため中身は通常の ArrayBuffer（SharedArrayBuffer ではない）
+      return new File([data as Uint8Array<ArrayBuffer>], name, { type: videoMimeType(name) })
     },
     async dispose() {
       try {
