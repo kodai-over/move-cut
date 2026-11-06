@@ -64,13 +64,13 @@ export const DOWNLOAD_URL_REVOKE_DELAY_MS = 10_000
 /** タイムラインの波形の表示 */
 export const CHART = {
   /** 動きスコアの線の色 */
-  scoreColor: '#2f7cf6',
+  scoreColor: 'rgba(242, 242, 240, 0.75)',
   /** フリーズ区間の帯の色 */
-  freezeColor: 'rgba(255, 159, 28, 0.35)',
+  freezeColor: 'rgba(110, 190, 255, 0.28)',
   /** 動きとして数えなかった時間（カメラ付近・本人検出前後）の帯の色 */
-  excludedColor: 'rgba(128, 128, 128, 0.22)',
+  excludedColor: 'rgba(255, 255, 255, 0.07)',
   /** 開始閾値（実線）・終了閾値（破線）の色 */
-  thresholdColor: 'rgba(47, 124, 246, 0.7)',
+  thresholdColor: 'rgba(255, 210, 63, 0.6)',
   /** 終了閾値の破線の模様（線・間隔のpx） */
   endThresholdDash: [4, 3],
   /** スコア軸の上限を、開始閾値のこの倍率以上にする（閾値線が枠外に消えないように） */
@@ -163,6 +163,8 @@ export const EXPORT = {
    * 超える場合は何回かに分けて書き出し・保存する。1本でこれを超えるクリップは単独で渡す
    */
   maxBatchBytes: 400 * 1024 * 1024,
+  /** 選び直しが止まってから、裏でクリップの書き出しを始めるまでの待ち時間（ミリ秒） */
+  prepareDelayMs: 800,
 } as const
 
 /** タイムライン編集画面（フェーズ5〜） */
@@ -174,13 +176,29 @@ export const TIMELINE = {
   /** 保存するコマのJPEG画質（0〜1） */
   filmstripQuality: 0.6,
   /** 波形の高さ（px） */
-  waveformHeight: 56,
-  /** 区間の帯の高さ（px） */
-  clipTrackHeight: 28,
+  waveformHeight: 44,
+  /** 区間の帯の高さ（px）。タップ・ダブルタップ・端のドラッグをしやすい高さにする */
+  clipTrackHeight: 44,
+  /** 区間の帯をダブルタップとみなす、2回のタップの間隔の上限（ミリ秒） */
+  doubleTapMs: 350,
   /** 最大の拡大率（1秒あたりのpx） */
   maxPxPerSec: 240,
-  /** 拡大・縮小ボタン1回の倍率 */
-  zoomStep: 2,
   /** キーフレームの目盛りを表示する拡大率（1秒あたりのpx）。これより縮小しているときは目盛りが詰まるので出さない */
   keyframeTickMinPxPerSec: 20,
+  /** 端をドラッグして縮めるときの、クリップの最短の長さ（秒） */
+  minClipSec: 0.5,
+  /** 区間の帯に長さを表示する最小の幅（px）。これより細い帯には文字を出さない */
+  clipLabelMinPx: 40,
+  /** 指でなぞるスクロールが止まったとみなすまでの時間（ミリ秒）。止まるまでは再生位置への自動スクロールをしない */
+  scrollIdleMs: 150,
+} as const
+
+/** プレビュー */
+export const PREVIEW = {
+  /** 長押しとみなすまでの時間（ミリ秒） */
+  longPressMs: 350,
+  /** 長押し中の再生速度 */
+  fastRate: 2,
+  /** 再生ボタンで、末尾からこの秒数以内にいるときは先頭から再生し直す */
+  restartNearEndSec: 0.05,
 } as const

@@ -16,7 +16,7 @@ export function UpdateBanner({ canUpdate }: Props) {
   if (needRefresh && canUpdate) {
     return (
       <div className="banner" role="status">
-        <span>新しいバージョンがあります。</span>
+        <span>新しいバージョンがあります</span>
         <button type="button" className="banner-action" onClick={() => void updateServiceWorker(true)}>
           更新する
         </button>
@@ -26,7 +26,7 @@ export function UpdateBanner({ canUpdate }: Props) {
   if (offlineReady) {
     return (
       <div className="banner" role="status">
-        <span>電波がなくても使えるようになりました。ホーム画面に追加しておくと、しばらく使わなくても消えにくくなります。</span>
+        <span title="ホーム画面に追加しておくと、しばらく使わなくても消えにくくなります">オフラインで使えます</span>
         <button type="button" className="banner-action" onClick={() => setOfflineReady(false)}>
           閉じる
         </button>

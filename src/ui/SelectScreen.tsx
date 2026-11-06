@@ -1,23 +1,23 @@
-// 動画選択画面：動画を1本選び、モードを選んで解析を始める
+// 動画選択画面：動画を1本選ぶと、読み込めしだい解析を始める
 import { useEffect, useState } from 'react'
-import type { Mode } from '../analysis/types'
 import type { SelectedVideo } from '../App'
-import { MODE_LABEL, formatDuration } from './labels'
 import { createVideoElement, loadVideoInfo, supportWarnings, UserFacingError, type VideoInfo } from '../video/videoFile'
 
 interface Props {
   video: SelectedVideo | null
-  mode: Mode
   error?: string
+  /** 選んだばかりの動画なら true（読み込めたら解析を始める。解析の失敗・中止で戻ってきたときは始めない） */
+  autoStart: boolean
   onSelectFile: (file: File | null) => void
-  onChangeMode: (mode: Mode) => void
   onStart: () => void
+  /** サポート範囲外の確認で「キャンセル」を選んだ */
+  onDecline: () => void
 }
 
 type InfoState = { status: 'idle' } | { status: 'loading' } | { status: 'ok'; info: VideoInfo } | { status: 'error'; message: string }
 type LoadResult = { url: string } & ({ status: 'ok'; info: VideoInfo } | { status: 'error'; message: string })
 
-export function SelectScreen({ video, mode, error, onSelectFile, onChangeMode, onStart }: Props) {
+export function SelectScreen({ video, error, autoStart, onSelectFile, onStart, onDecline }: Props) {
   const [loaded, setLoaded] = useState<LoadResult | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
 
@@ -59,50 +59,39 @@ export function SelectScreen({ video, mode, error, onSelectFile, onChangeMode, o
     onSelectFile(file ?? null)
   }
 
-  const handleStart = () => {
+  // 読み込めたら、サポート範囲外なら確かめてから解析を始める
+  const ready = info.status === 'ok'
+  useEffect(() => {
+    if (!ready || !autoStart) return
     if (warnings.length > 0) {
       const ok = window.confirm(
         `${warnings.join('\n')}\n正式サポート外のため、解析が遅い・途中で止まる可能性があります。続けますか？`,
       )
-      if (!ok) return
+      if (!ok) {
+        onDecline()
+        return
+      }
     }
     onStart()
-  }
+    // warnings は info から決まるので ready と同時に変わる
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, autoStart])
 
   return (
-    <section className="screen">
-      <label className="file-picker">
-        <input type="file" accept="video/*" onChange={(e) => handleFile(e.target.files?.[0])} />
-        <span className="button secondary">{video ? '動画を選び直す' : '動画を選ぶ'}</span>
-        <span className="file-name">{video ? video.file.name : 'まだ選ばれていません'}</span>
+    <section className="select">
+      <h1 className="wordmark">MoveCut</h1>
+      <label className="file-picker" title="動きのある区間を自動で切り出します">
+        <input type="file" accept="video/*" onChange={(e) => {
+            handleFile(e.target.files?.[0])
+            // 同じ動画を選び直しても反応するように空にする
+            e.target.value = ''
+          }}
+        />
+        <span className="button primary">{info.status === 'loading' ? '読み込み中…' : '動画を選ぶ'}</span>
       </label>
-
-      {info.status === 'ok' && (
-        <p className="meta">
-          {formatDuration(info.info.duration)} ・ {info.info.width}×{info.info.height}
-        </p>
-      )}
-      {info.status === 'loading' && <p className="meta">動画を読み込み中…</p>}
       {info.status === 'error' && <p className="message error">{info.message}</p>}
       {fileError && <p className="message error">{fileError}</p>}
-      {warnings.length > 0 && <p className="message warning">{warnings.join(' ')}正式サポート外です。</p>}
-
-      <fieldset className="modes">
-        <legend>モード</legend>
-        {(Object.keys(MODE_LABEL) as Mode[]).map((m) => (
-          <label key={m} className={`mode ${mode === m ? 'selected' : ''}`}>
-            <input type="radio" name="mode" value={m} checked={mode === m} onChange={() => onChangeMode(m)} />
-            <span className="mode-title">{MODE_LABEL[m].title}</span>
-            <span className="mode-note">{MODE_LABEL[m].note}</span>
-          </label>
-        ))}
-      </fieldset>
-
       {error && <p className="message error">{error}</p>}
-
-      <button className="button primary" disabled={info.status !== 'ok'} onClick={handleStart}>
-        解析開始
-      </button>
     </section>
   )
 }

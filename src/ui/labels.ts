@@ -1,10 +1,4 @@
-// 画面間で共有する表示用の定数・関数
-import type { Mode } from '../analysis/types'
-
-export const MODE_LABEL: Record<Mode, { title: string; note: string }> = {
-  idea: { title: 'アイデア出し', note: '細かく分割' },
-  run: { title: '通し練習', note: '前後のみトリム' },
-}
+// 画面間で共有する表示用の関数
 
 /** 秒を m:ss 形式にする */
 export function formatDuration(sec: number): string {
