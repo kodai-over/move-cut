@@ -59,6 +59,8 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
   const [tool, setTool] = useState<TimelineTool>('select')
   /** 再生中になぞり始めたら、なぞり終えたときに再生を続ける */
   const resumeAfterScrubRef = useRef(false)
+  /** シークの準備（無音の一瞬の再生）が終わったら再生する */
+  const playAfterWarmUpRef = useRef(false)
   const [busy, setBusy] = useState(false)
   /** 動画ごとのキーフレームの時刻（読めなかったら null。吸着させない） */
   const [keyframes, setKeyframes] = useState<ReadonlyMap<number, number[] | null>>(new Map())
@@ -224,6 +226,11 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
         warmingUpRef.current = false
         el.muted = wasMuted
         el.currentTime = pendingSeekRef.current
+        // 準備の間に再生を頼まれていたら（なぞり終えたときなど）、ここで再生する
+        if (playAfterWarmUpRef.current) {
+          playAfterWarmUpRef.current = false
+          void el.play().catch(() => {})
+        }
       })
   }
 
@@ -289,6 +296,11 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
       switchRef.current.play = true
       return
     }
+    // シークの準備の最中なら、終わってから再生する（準備の一時停止で止められないように）
+    if (warmingUpRef.current) {
+      playAfterWarmUpRef.current = true
+      return
+    }
     void videoRef.current?.play().catch(() => {})
   }
 
@@ -332,18 +344,23 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
   }
 
   // カットツール：タップした位置でクリップを2つに分ける（切る位置はキーフレームに吸着）
-  const cutClip = (id: number, time: number) => {
+  // 分けられなかったら false を返す（帯を揺らして知らせる）
+  const cutClip = (id: number, time: number): boolean => {
     const { source, localId } = splitClipId(id)
+    // キーフレームをまだ読んでいない動画は、切る位置を吸着できず書き出しとずれるので分けない（読めなかった動画は吸着なしで分ける）
+    if (!keyframes.has(source)) return false
     const limits = { duration: durations[source], minSec: TIMELINE.minClipSec, keyframes: keyframes.get(source) ?? null }
     const next = splitClip(sourceClips[source], localId, time - offsets[source], limits)
-    if (next) setSourceClips(new Map([[source, next]]))
+    if (!next) return false
+    setSourceClips(new Map([[source, next]]))
+    return true
   }
 
   // キーボード：スペースで再生・停止、A で選択ツール、B でカットツール（Final Cut Pro と同じ）
   const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {})
   useEffect(() => {
     keyHandlerRef.current = (e) => {
-      if (exportSnapshot || settingsOpen || e.metaKey || e.ctrlKey || e.altKey) return
+      if (exportSnapshot || settingsOpen || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return
       if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select')) return
       if (e.key === ' ') {
         e.preventDefault()
@@ -520,8 +537,9 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
         onTapClip={playClip}
         onDoubleTapClip={toggleKeep}
         onTapEmpty={() => {
-          setSelectedId(null)
-          togglePlay()
+          // 選んでいるクリップがあれば、まず選ぶのをやめるだけにする（つまみを消すつもりのタップで再生しない）
+          if (selectedId !== null) setSelectedId(null)
+          else togglePlay()
         }}
         onScrubEnd={scrubEnd}
         tool={tool}

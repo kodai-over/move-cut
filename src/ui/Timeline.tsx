@@ -51,7 +51,7 @@ interface Props {
   /** 選択ツール（帯のタップで再生・ダブルタップで残す／捨てる・つまみで伸縮）か、カットツール（帯をタップした位置で分ける）か */
   tool: TimelineTool
   /** カットツールで帯をタップした（time はタップした位置の時刻） */
-  onCutClip: (id: number, time: number) => void
+  onCutClip: (id: number, time: number) => boolean
   onTrimStart: (id: number, edge: ClipEdge) => void
   /** つまみをドラッグ中（time はつまみを動かした先の時刻） */
   onTrim: (time: number) => void
@@ -293,9 +293,16 @@ export function Timeline(props: Props) {
     endInteractionLater()
   }
   const onClickCapture = (e: React.MouseEvent) => {
-    if (!suppressClickRef.current) return
-    suppressClickRef.current = false
-    e.stopPropagation()
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false
+      e.stopPropagation()
+      return
+    }
+    // タップ（スクロールしていない）なら、指を離した後の待ち時間を待たずに再生位置への自動スクロールを戻す
+    // （タップで再生を始めたとき、すぐにタイムラインが流れるように）
+    window.clearTimeout(scrollIdleRef.current)
+    interactingRef.current = false
+    touchingRef.current = false
   }
   useEffect(() => () => window.clearTimeout(scrollIdleRef.current), [])
 
@@ -312,7 +319,16 @@ export function Timeline(props: Props) {
   const clipClick = (id: number) => (e: React.MouseEvent) => {
     e.stopPropagation()
     if (props.tool === 'blade') {
-      props.onCutClip(id, clientXToTime(e.clientX))
+      if (!props.onCutClip(id, clientXToTime(e.clientX))) {
+        // 分けられなかったことを、帯を揺らして知らせる（動きを減らす設定のときは揺らさない）
+        const band = (e.currentTarget as HTMLElement).closest('.clip-band')
+        if (band && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          band.animate(
+            [{ transform: 'none' }, { transform: 'translateX(-3px)' }, { transform: 'translateX(3px)' }, { transform: 'none' }],
+            { duration: TIMELINE.rejectShakeMs },
+          )
+        }
+      }
       return
     }
     const now = e.timeStamp
