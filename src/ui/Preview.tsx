@@ -13,11 +13,13 @@ interface Props {
   onPlayingChange: (playing: boolean) => void
   /** 動画を読み込めた（書き出し画面から戻ったときなどに、再生位置を戻すのに使う） */
   onLoaded: () => void
+  /** 動画の終わりまで再生した（次の動画へ続けるのに使う） */
+  onEnded: () => void
   /** 動画の上に重ねる操作（戻る・設定・書き出しなど） */
   children?: ReactNode
 }
 
-export function Preview({ videoRef, src, currentTime, duration, playing, onTogglePlay, onPlayingChange, onLoaded, children }: Props) {
+export function Preview({ videoRef, src, currentTime, duration, playing, onTogglePlay, onPlayingChange, onLoaded, onEnded, children }: Props) {
   const [fast, setFast] = useState(false)
   const pressRef = useRef<{ timer: number; long: boolean; wasPlaying: boolean; wasMuted: boolean } | null>(null)
   const video = () => videoRef.current
@@ -78,6 +80,7 @@ export function Preview({ videoRef, src, currentTime, duration, playing, onToggl
           onPlay={() => onPlayingChange(true)}
           onPause={() => onPlayingChange(false)}
           onLoadedMetadata={onLoaded}
+          onEnded={onEnded}
         />
         {!playing && !fast && (
           <svg className="preview-play" viewBox="0 0 24 24" aria-hidden="true">

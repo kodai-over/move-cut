@@ -4,17 +4,16 @@
 // メモリ上限に備えて推定サイズで何回かに分け、回ごとに書き出し済みにして保存する
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { EXPORT } from '../config'
-import { planBatches, type NumberedClip } from '../export/batch'
+import { estimateClipBytes, planBatches, type NumberedClip } from '../export/batch'
 import { UserFacingError } from '../video/videoFile'
-import type { SelectedVideo } from '../App'
+import type { SourceVideo } from '../App'
 import { keepScreenAwake, saveFiles } from './browser'
 import type { ExporterQueue } from './useClipExporter'
 
 interface Props {
-  video: SelectedVideo
-  /** 動画の長さ（秒） */
-  duration: number
-  /** 保存するクリップ（number は区間の連番。ファイル名に使う） */
+  /** 元動画（推定サイズの計算に使う） */
+  sources: SourceVideo[]
+  /** 保存するクリップ（source は何本目の動画か、number はその動画での連番。ファイル名に使う） */
   chosen: NumberedClip[]
   exporter: ExporterQueue
   /** 書き出し済みのファイル。親が持ち、この画面を離れて戻っても使い回す（いま保存する回のものだけを残す） */
@@ -24,14 +23,19 @@ interface Props {
 }
 
 /** 書き出したファイルを見分けるキー（連番が変わるとファイル名も変わるので含める） */
-const fileKey = (c: NumberedClip) => `${c.number}:${c.clip.start}-${c.clip.end}`
+const fileKey = (c: NumberedClip) => `${c.source}:${c.number}:${c.clip.start}-${c.clip.end}`
 
 type Status = { kind: 'saved'; count: number; all: boolean } | { kind: 'cancelled' } | { kind: 'error'; message: string }
 
-export function ClipSaver({ video, duration, chosen, exporter, cacheRef, onBusyChange }: Props) {
+export function ClipSaver({ sources, chosen, exporter, cacheRef, onBusyChange }: Props) {
   const batches = useMemo(
-    () => planBatches(chosen, video.file.size, duration, EXPORT.maxBatchBytes),
-    [chosen, video.file.size, duration],
+    () =>
+      planBatches(
+        chosen,
+        (c) => estimateClipBytes(c.clip, sources[c.source].file.size, sources[c.source].duration),
+        EXPORT.maxBatchBytes,
+      ),
+    [chosen, sources],
   )
   // 選び方が変わったら、保存の回数も最初からにする
   const signature = batches.map((b) => b.map(fileKey).join(',')).join('|')
@@ -80,7 +84,7 @@ export function ClipSaver({ video, duration, chosen, exporter, cacheRef, onBusyC
           if (preparedRef.current.has(key)) continue
           try {
             const file = await exporter.run((ex) =>
-              cancelled || preparedRef.current.has(key) ? Promise.resolve(null) : ex.exportClip(c.clip, c.number),
+              cancelled || preparedRef.current.has(key) ? Promise.resolve(null) : ex.exportClip(c.source, c.clip, c.number),
             )
             // 途中で選び直されても、まだ使うクリップなら書き出した結果を使う
             if (file && wantedRef.current.has(key)) updatePrepared([key, file])

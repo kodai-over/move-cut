@@ -10,6 +10,14 @@ import { clampZoom, fitZoom, timeToX, waveformColumns, xToTime } from '../timeli
 import type { FilmstripFrame } from '../video/analyzeVideo'
 import { formatDuration } from './labels'
 
+/** 解析が終わっていない（または失敗した）動画の範囲 */
+export interface PendingRange extends Interval {
+  label: string
+  title?: string
+}
+
+export type TimelineTool = 'select' | 'blade'
+
 interface Props {
   duration: number
   samples: MotionSample[]
@@ -19,10 +27,14 @@ interface Props {
   clips: EditClip[]
   freezes: Interval[]
   excluded: Interval[]
+  /** 解析が終わっていない動画の範囲 */
+  pending: PendingRange[]
+  /** 動画のつなぎ目の時刻 */
+  boundaries: number[]
   startThreshold: number
   endThreshold: number
-  /** キーフレームの時刻（読み取り中・失敗時は null） */
-  keyframes: number[] | null
+  /** キーフレームの時刻（読めた動画の分だけ） */
+  keyframes: number[]
   currentTime: number
   selectedId: number | null
   /** なぞってスクロールした（その時刻へシークする。再生中なら止める） */
@@ -32,7 +44,14 @@ interface Props {
   /** 区間の帯をダブルタップした（残す／捨てるを切り替える） */
   onDoubleTapClip: (id: number) => void
   /** 帯のないところをタップした */
+  /** 帯のないところをタップした（再生・停止を切り替える） */
   onTapEmpty: () => void
+  /** なぞる操作が終わった（なぞる前に再生中だったら再生を続けるのに使う） */
+  onScrubEnd: () => void
+  /** 選択ツール（帯のタップで再生・ダブルタップで残す／捨てる・つまみで伸縮）か、カットツール（帯をタップした位置で分ける）か */
+  tool: TimelineTool
+  /** カットツールで帯をタップした（time はタップした位置の時刻） */
+  onCutClip: (id: number, time: number) => boolean
   onTrimStart: (id: number, edge: ClipEdge) => void
   /** つまみをドラッグ中（time はつまみを動かした先の時刻） */
   onTrim: (time: number) => void
@@ -84,6 +103,7 @@ export function Timeline(props: Props) {
     scrollIdleRef.current = window.setTimeout(() => {
       interactingRef.current = false
       setInteractionEnded((n) => n + 1)
+      props.onScrubEnd()
     }, TIMELINE.scrollIdleMs)
   }
   useLayoutEffect(() => {
@@ -194,12 +214,14 @@ export function Timeline(props: Props) {
     ctx.strokeStyle = CHART.scoreColor
     ctx.lineWidth = 1.5
     ctx.beginPath()
-    let drawing = false
+    // 解析中の動画をはさむなど、サンプルが大きく離れているところは線をつなげない
+    const breakPx = CHART.lineBreakGapSec * pxPerSec
+    let lastX: number | null = null
     cols.forEach((v, x) => {
       if (v === null) return
-      if (drawing) ctx.lineTo(x + left, y(v))
+      if (lastX !== null && x - lastX <= breakPx) ctx.lineTo(x + left, y(v))
       else ctx.moveTo(x + left, y(v))
-      drawing = true
+      lastX = x
     })
     ctx.stroke()
   }, [viewWidth, pad, pxPerSec, duration, sampleTimes, scores, maxScore, props.excluded, props.freezes, props.startThreshold, props.endThreshold])
@@ -238,13 +260,77 @@ export function Timeline(props: Props) {
     interactingRef.current = true
     endInteractionLater()
   }
+
+  // マウスでつかんで横にドラッグするとスクロールする（指はブラウザのスクロールに任せる）。
+  // 少しでも動かしたら、離したときのクリック（帯のタップなど）は無視する
+  const mouseDragRef = useRef<{ pointerId: number; startX: number; startScroll: number; moved: boolean } | null>(null)
+  const suppressClickRef = useRef(false)
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return
+    mouseDragRef.current = { pointerId: e.pointerId, startX: e.clientX, startScroll: e.currentTarget.scrollLeft, moved: false }
+  }
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = mouseDragRef.current
+    if (!drag || drag.pointerId !== e.pointerId) return
+    const dx = e.clientX - drag.startX
+    if (!drag.moved) {
+      if (Math.abs(dx) < TIMELINE.dragThresholdPx) return
+      drag.moved = true
+      e.currentTarget.setPointerCapture(e.pointerId)
+      interactingRef.current = true
+      touchingRef.current = true
+      window.clearTimeout(scrollIdleRef.current)
+    }
+    e.currentTarget.scrollLeft = drag.startScroll - dx
+  }
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = mouseDragRef.current
+    if (!drag || drag.pointerId !== e.pointerId) return
+    mouseDragRef.current = null
+    if (!drag.moved) return
+    suppressClickRef.current = true
+    touchingRef.current = false
+    endInteractionLater()
+  }
+  const onClickCapture = (e: React.MouseEvent) => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false
+      e.stopPropagation()
+      return
+    }
+    // タップ（スクロールしていない）なら、指を離した後の待ち時間を待たずに再生位置への自動スクロールを戻す
+    // （タップで再生を始めたとき、すぐにタイムラインが流れるように）
+    window.clearTimeout(scrollIdleRef.current)
+    interactingRef.current = false
+    touchingRef.current = false
+  }
   useEffect(() => () => window.clearTimeout(scrollIdleRef.current), [])
 
   // 1回目のタップで頭から再生し、続けて同じ帯をタップしたらダブルタップとして残す／捨てるを切り替える。
   // （ダブルタップを待ってから再生すると反応が遅れるので、1回目はすぐ再生する）
   const lastTapRef = useRef<{ id: number; at: number } | null>(null)
+  /** 画面上の x 座標（clientX）を時刻に直す */
+  const clientXToTime = (clientX: number) => {
+    const el = scrollRef.current
+    if (!el) return 0
+    const x = clientX - el.getBoundingClientRect().left + el.scrollLeft - pad
+    return Math.min(duration, Math.max(0, x / pxPerSec))
+  }
   const clipClick = (id: number) => (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (props.tool === 'blade') {
+      if (!props.onCutClip(id, clientXToTime(e.clientX))) {
+        // 分けられなかったことを、帯を揺らして知らせる（動きを減らす設定のときは揺らさない）
+        const band = (e.currentTarget as HTMLElement).closest('.clip-band')
+        if (band && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          band.animate(
+            [{ transform: 'none' }, { transform: 'translateX(-3px)' }, { transform: 'translateX(3px)' }, { transform: 'none' }],
+            { duration: TIMELINE.rejectShakeMs },
+          )
+        }
+      }
+      return
+    }
     const now = e.timeStamp
     const last = lastTapRef.current
     if (last && last.id === id && now - last.at <= TIMELINE.doubleTapMs) {
@@ -275,11 +361,20 @@ export function Timeline(props: Props) {
     props.onTrimEnd()
   }
 
-  const showKeyframes = keyframes !== null && pxPerSec >= TIMELINE.keyframeTickMinPxPerSec
+  const showKeyframes = pxPerSec >= TIMELINE.keyframeTickMinPxPerSec
+
+  // カットツールのとき、マウスの位置に切る位置の線を出す（指では出さない）
+  const [bladeX, setBladeX] = useState<number | null>(null)
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (props.tool !== 'blade') return
+    const el = scrollRef.current
+    if (!el) return
+    setBladeX(e.clientX - el.getBoundingClientRect().left)
+  }
 
   return (
     <div
-      className="timeline"
+      className={`timeline${props.tool === 'blade' ? ' blade' : ''}`}
       title="水色はフリーズ、薄い灰色は動きとして数えなかった時間。黄色の実線が開始閾値、破線が終了閾値。ピンチで拡大・縮小"
     >
       <div
@@ -290,7 +385,14 @@ export function Timeline(props: Props) {
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}
         onWheel={onWheel}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onClickCapture={onClickCapture}
         onClick={props.onTapEmpty}
+        onMouseMove={onMouseMove}
+        onMouseLeave={() => setBladeX(null)}
       >
         <div className="timeline-content" style={{ width: trackWidth + viewWidth, height: CONTENT_HEIGHT }}>
           <Filmstrip
@@ -306,6 +408,19 @@ export function Timeline(props: Props) {
             // 横スクロールしても表示領域の左端に留まる（position: sticky）。見えている範囲だけを描く
             style={{ top: TIMELINE.filmstripHeight, width: viewWidth, height: TIMELINE.waveformHeight }}
           />
+          {props.boundaries.map((t) => (
+            <span key={t} className="source-boundary" style={{ left: pad + timeToX(t, pxPerSec) }} />
+          ))}
+          {props.pending.map((p) => (
+            <span
+              key={p.start}
+              className="pending-range"
+              style={{ left: pad + timeToX(p.start, pxPerSec), width: timeToX(p.end - p.start, pxPerSec) }}
+              title={p.title}
+            >
+              <span>{p.label}</span>
+            </span>
+          ))}
           <div
             className="clip-track"
             style={{ top: TRACK_TOP, left: pad, width: trackWidth, height: TIMELINE.clipTrackHeight }}
@@ -325,12 +440,13 @@ export function Timeline(props: Props) {
                     type="button"
                     className="clip-body"
                     onClick={clipClick(c.id)}
-                    title="タップで再生、ダブルタップで残す／捨てる"
+                    title={props.tool === 'blade' ? 'タップした位置で2つに分ける' : 'タップで再生、ダブルタップで残す／捨てる'}
                     aria-label={`クリップ${i + 1}（${formatDuration(c.start)}〜${formatDuration(c.end)}・${c.keep ? '残す' : '捨てる'}）`}
                   >
                     {width > TIMELINE.clipLabelMinPx && formatDuration(c.end - c.start)}
                   </button>
                   {selected &&
+                    props.tool === 'select' &&
                     (['start', 'end'] as const).map((edge) => (
                       <span
                         key={edge}
@@ -350,6 +466,9 @@ export function Timeline(props: Props) {
         </div>
       </div>
       <div className="playhead" style={{ height: CONTENT_HEIGHT }} />
+      {props.tool === 'blade' && bladeX !== null && (
+        <div className="blade-line" style={{ left: bladeX, height: CONTENT_HEIGHT }} />
+      )}
     </div>
   )
 }

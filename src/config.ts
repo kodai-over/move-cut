@@ -75,6 +75,8 @@ export const CHART = {
   endThresholdDash: [4, 3],
   /** スコア軸の上限を、開始閾値のこの倍率以上にする（閾値線が枠外に消えないように） */
   scoreAxisHeadroom: 1.2,
+  /** 波形の線を切る、サンプルの間隔（秒）。これより離れていれば（解析中の動画をはさむなど）線をつなげない */
+  lineBreakGapSec: 1,
 } as const
 
 /** 区間の切り出し（ステップ2）のうち、スライダーで変えるパラメータ */
@@ -189,6 +191,10 @@ export const TIMELINE = {
   minClipSec: 0.5,
   /** 区間の帯に長さを表示する最小の幅（px）。これより細い帯には文字を出さない */
   clipLabelMinPx: 40,
+  /** カットできなかった帯を揺らす時間（ミリ秒） */
+  rejectShakeMs: 300,
+  /** マウスでつかんでこれ以上動かしたらドラッグとみなす（px）。これ未満ならクリック */
+  dragThresholdPx: 4,
   /** 指でなぞるスクロールが止まったとみなすまでの時間（ミリ秒）。止まるまでは再生位置への自動スクロールをしない */
   scrollIdleMs: 150,
 } as const

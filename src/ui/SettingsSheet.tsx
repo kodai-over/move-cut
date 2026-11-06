@@ -9,11 +9,13 @@ interface Props {
   onResetParams: () => void
   onSetAll: (keep: boolean) => void
   onExportCsv: () => void
+  /** 再生位置にある動画の解析が終わっていれば true（CSV はその動画のもの） */
+  canExportCsv: boolean
   onBack: () => void
   onClose: () => void
 }
 
-export function SettingsSheet({ params, onChangeParams, onResetParams, onSetAll, onExportCsv, onBack, onClose }: Props) {
+export function SettingsSheet({ params, onChangeParams, onResetParams, onSetAll, onExportCsv, canExportCsv, onBack, onClose }: Props) {
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet" role="dialog" aria-label="設定" onClick={(e) => e.stopPropagation()}>
@@ -35,7 +37,13 @@ export function SettingsSheet({ params, onChangeParams, onResetParams, onSetAll,
           <button type="button" className="chip" onClick={onBack}>
             別の動画を選ぶ
           </button>
-          <button type="button" className="chip quiet" onClick={onExportCsv} title="解析結果のCSV（デバッグ用）">
+          <button
+            type="button"
+            className="chip quiet"
+            onClick={onExportCsv}
+            disabled={!canExportCsv}
+            title="再生位置にある動画の解析結果のCSV（デバッグ用）"
+          >
             CSV
           </button>
         </div>
