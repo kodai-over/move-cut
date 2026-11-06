@@ -131,21 +131,71 @@ button {
   stroke-linejoin: round;
 }
 
-.pill {
-  min-height: 36px;
-  padding: 0 16px;
+/* 文字だけの控えめなボタン（書き出すなど） */
+.text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 8px;
   border: 0;
-  border-radius: 18px;
-  background: var(--keep);
-  color: var(--keep-text);
-  font-weight: 700;
+  background: transparent;
   font-size: 15px;
+  font-weight: 600;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
   cursor: pointer;
 }
 
-.pill:disabled {
+.text-button .icon {
+  width: 20px;
+  height: 20px;
+}
+
+.text-button:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* プレビューの右下に重ねる道具（選択／カット） */
+.tools {
+  position: absolute;
+  right: 8px;
+  bottom: 4px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 22px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.tools .icon-button {
+  width: 36px;
+  height: 36px;
+  color: var(--muted);
+}
+
+.tools .icon-button .icon {
+  width: 20px;
+  height: 20px;
+}
+
+.tools .icon-button.active {
+  background: var(--text);
+  color: var(--black);
+}
+
+/* カットツールの切る位置の線（マウスの位置） */
+.blade-line {
+  position: absolute;
+  top: 6px;
+  width: 1px;
+  background: var(--keep);
+  pointer-events: none;
+}
+
+.timeline.blade .timeline-scroll,
+.timeline.blade .clip-body {
+  cursor: crosshair;
 }
 
 .chip {

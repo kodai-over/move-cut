@@ -75,3 +75,24 @@ export function trimClip(
   const moved = clips.map((c) => (c.id === id ? { ...c, start, end } : c))
   return mergeOverlaps(moved, id)
 }
+
+/**
+ * クリップを time で2つに分ける（カットツール）。分けた後ろのクリップの開始はキーフレームでなければならないので、
+ * 切る位置は最も近いキーフレームに吸着させる。どちらかが最短の長さに満たなければ分けない（null を返す）。
+ * 後ろのクリップには新しい番号を付け、残す／捨てるは元のクリップを引き継ぐ
+ */
+export function splitClip(
+  clips: readonly EditClip[],
+  id: number,
+  time: number,
+  limits: TrimLimits,
+): EditClip[] | null {
+  const target = clips.find((c) => c.id === id)
+  if (!target) return null
+  const cut = limits.keyframes && limits.keyframes.length > 0 ? nearestKeyframe(time, limits.keyframes) : time
+  if (cut - target.start < limits.minSec || target.end - cut < limits.minSec) return null
+  const nextId = Math.max(...clips.map((c) => c.id)) + 1
+  return clips.flatMap((c) =>
+    c.id === id ? [{ ...c, end: cut }, { id: nextId, start: cut, end: c.end, keep: c.keep }] : [c],
+  )
+}

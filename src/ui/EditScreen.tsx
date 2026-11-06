@@ -10,7 +10,7 @@ import { toCsv } from '../analysis/motion'
 import { excludedIntervals, segmentMotion } from '../analysis/segment'
 import { PREVIEW, SEGMENT_DEFAULTS, TIMELINE, type SegmentParams } from '../config'
 import type { NumberedClip } from '../export/batch'
-import { clipsFromIntervals, trimClip, type ClipEdge, type EditClip } from '../timeline/clips'
+import { clipsFromIntervals, splitClip, trimClip, type ClipEdge, type EditClip } from '../timeline/clips'
 import { globalClipId, locate, shiftIntervals, shiftTimes, sourceOffsets, splitClipId } from '../timeline/sources'
 import type { FilmstripFrame } from '../video/analyzeVideo'
 import type { AnalyzingProgress, SourceAnalysis, SourceVideo } from '../App'
@@ -19,7 +19,7 @@ import { ExportScreen } from './ExportScreen'
 import { Icon } from './icons'
 import { Preview } from './Preview'
 import { SettingsSheet } from './SettingsSheet'
-import { Timeline, type PendingRange } from './Timeline'
+import { Timeline, type PendingRange, type TimelineTool } from './Timeline'
 import { useClipExporter } from './useClipExporter'
 
 interface Props {
@@ -55,6 +55,10 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
   /** 書き出し画面を開いたときの残すクリップ（開いている間に解析が終わっても変えない。分けて保存している途中で回がやり直しにならないように） */
   const [exportSnapshot, setExportSnapshot] = useState<{ chosen: NumberedClip[]; pendingCount: number } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /** タイムラインの道具（選択／カット） */
+  const [tool, setTool] = useState<TimelineTool>('select')
+  /** 再生中になぞり始めたら、なぞり終えたときに再生を続ける */
+  const resumeAfterScrubRef = useRef(false)
   const [busy, setBusy] = useState(false)
   /** 動画ごとのキーフレームの時刻（読めなかったら null。吸着させない） */
   const [keyframes, setKeyframes] = useState<ReadonlyMap<number, number[] | null>>(new Map())
@@ -269,10 +273,23 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
     setPlayingClipId(null)
   }
 
-  /** タイムラインをなぞった：再生中なら止めてからシークする */
+  /** タイムラインをなぞった：再生中ならいったん止めてシークし、なぞり終えたら再生を続ける */
   const scrub = (time: number) => {
-    if (playing) stop()
+    if (playing) {
+      resumeAfterScrubRef.current = true
+      stop()
+    }
     seek(time)
+  }
+  const scrubEnd = () => {
+    if (!resumeAfterScrubRef.current) return
+    resumeAfterScrubRef.current = false
+    // 別の動画へ切り替えて読み込み中なら、読み込めたら再生する
+    if (switchRef.current) {
+      switchRef.current.play = true
+      return
+    }
+    void videoRef.current?.play().catch(() => {})
   }
 
   const togglePlay = () => {
@@ -313,6 +330,33 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
       // 再生できなくても、シーク位置の表示は試みる
     })
   }
+
+  // カットツール：タップした位置でクリップを2つに分ける（切る位置はキーフレームに吸着）
+  const cutClip = (id: number, time: number) => {
+    const { source, localId } = splitClipId(id)
+    const limits = { duration: durations[source], minSec: TIMELINE.minClipSec, keyframes: keyframes.get(source) ?? null }
+    const next = splitClip(sourceClips[source], localId, time - offsets[source], limits)
+    if (next) setSourceClips(new Map([[source, next]]))
+  }
+
+  // キーボード：スペースで再生・停止、A で選択ツール、B でカットツール（Final Cut Pro と同じ）
+  const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {})
+  useEffect(() => {
+    keyHandlerRef.current = (e) => {
+      if (exportSnapshot || settingsOpen || e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select')) return
+      if (e.key === ' ') {
+        e.preventDefault()
+        togglePlay()
+      } else if (e.key === 'a' || e.key === 'A') setTool('select')
+      else if (e.key === 'b' || e.key === 'B') setTool('blade')
+    }
+  })
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => keyHandlerRef.current(e)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const toggleKeep = (id: number) => {
     const { source, localId } = splitClipId(id)
@@ -421,7 +465,7 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
           )}
           <button
             type="button"
-            className="pill"
+            className="text-button"
             onClick={() => {
               stop()
               setExportSnapshot({ chosen, pendingCount })
@@ -429,7 +473,30 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
             disabled={chosen.length === 0}
             title={chosen.length === 0 ? '残すクリップがありません' : `残す${chosen.length}本を書き出す`}
           >
+            <Icon name="export" />
             書き出す
+          </button>
+        </div>
+        <div className="tools" role="group" aria-label="道具">
+          <button
+            type="button"
+            className={`icon-button${tool === 'select' ? ' active' : ''}`}
+            onClick={() => setTool('select')}
+            aria-pressed={tool === 'select'}
+            aria-label="選択"
+            title="選択（A）：帯のタップで再生、ダブルタップで残す／捨てる、両端のつまみで伸縮"
+          >
+            <Icon name="pointer" />
+          </button>
+          <button
+            type="button"
+            className={`icon-button${tool === 'blade' ? ' active' : ''}`}
+            onClick={() => setTool('blade')}
+            aria-pressed={tool === 'blade'}
+            aria-label="カット"
+            title="カット（B）：帯をタップした位置で2つに分ける"
+          >
+            <Icon name="scissors" />
           </button>
         </div>
       </Preview>
@@ -452,7 +519,13 @@ export function EditScreen({ sources, analyses, analyzing, params, onChangeParam
         onScrub={scrub}
         onTapClip={playClip}
         onDoubleTapClip={toggleKeep}
-        onTapEmpty={() => setSelectedId(null)}
+        onTapEmpty={() => {
+          setSelectedId(null)
+          togglePlay()
+        }}
+        onScrubEnd={scrubEnd}
+        tool={tool}
+        onCutClip={cutClip}
         onTrimStart={trimStart}
         onTrim={trim}
         onTrimEnd={trimEnd}

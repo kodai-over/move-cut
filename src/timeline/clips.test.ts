@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clipsFromIntervals, mergeOverlaps, trimClip, type EditClip } from './clips'
+import { clipsFromIntervals, mergeOverlaps, splitClip, trimClip, type EditClip } from './clips'
 
 const limits = { duration: 60, minSec: 0.5, keyframes: null }
 const clip = (id: number, start: number, end: number, keep = true): EditClip => ({ id, start, end, keep })
@@ -69,5 +69,27 @@ describe('trimClip', () => {
 
   it('対象がなければそのまま返す', () => {
     expect(trimClip(clips, 9, 'end', 30, limits)).toEqual(clips)
+  })
+})
+
+describe('splitClip', () => {
+  const clips = [clip(0, 2, 5), clip(1, 10, 14, false), clip(2, 20, 25)]
+
+  it('指定した時刻で2つに分け、後ろに新しい番号を付けて残す／捨てるを引き継ぐ', () => {
+    expect(splitClip(clips, 1, 12, limits)).toEqual([clip(0, 2, 5), clip(1, 10, 12, false), clip(3, 12, 14, false), clip(2, 20, 25)])
+  })
+
+  it('切る位置を最も近いキーフレームに吸着させる', () => {
+    const kf = { ...limits, keyframes: [0, 11, 13] }
+    expect(splitClip(clips, 1, 11.4, kf)?.[1]).toEqual(clip(1, 10, 11, false))
+  })
+
+  it('どちらかが最短の長さに満たなければ分けない', () => {
+    expect(splitClip(clips, 1, 10.2, limits)).toBeNull()
+    expect(splitClip(clips, 1, 13.8, limits)).toBeNull()
+  })
+
+  it('対象がなければ分けない', () => {
+    expect(splitClip(clips, 9, 12, limits)).toBeNull()
   })
 })

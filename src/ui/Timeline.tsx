@@ -16,6 +16,8 @@ export interface PendingRange extends Interval {
   title?: string
 }
 
+export type TimelineTool = 'select' | 'blade'
+
 interface Props {
   duration: number
   samples: MotionSample[]
@@ -42,7 +44,14 @@ interface Props {
   /** 区間の帯をダブルタップした（残す／捨てるを切り替える） */
   onDoubleTapClip: (id: number) => void
   /** 帯のないところをタップした */
+  /** 帯のないところをタップした（再生・停止を切り替える） */
   onTapEmpty: () => void
+  /** なぞる操作が終わった（なぞる前に再生中だったら再生を続けるのに使う） */
+  onScrubEnd: () => void
+  /** 選択ツール（帯のタップで再生・ダブルタップで残す／捨てる・つまみで伸縮）か、カットツール（帯をタップした位置で分ける）か */
+  tool: TimelineTool
+  /** カットツールで帯をタップした（time はタップした位置の時刻） */
+  onCutClip: (id: number, time: number) => void
   onTrimStart: (id: number, edge: ClipEdge) => void
   /** つまみをドラッグ中（time はつまみを動かした先の時刻） */
   onTrim: (time: number) => void
@@ -94,6 +103,7 @@ export function Timeline(props: Props) {
     scrollIdleRef.current = window.setTimeout(() => {
       interactingRef.current = false
       setInteractionEnded((n) => n + 1)
+      props.onScrubEnd()
     }, TIMELINE.scrollIdleMs)
   }
   useLayoutEffect(() => {
@@ -292,8 +302,19 @@ export function Timeline(props: Props) {
   // 1回目のタップで頭から再生し、続けて同じ帯をタップしたらダブルタップとして残す／捨てるを切り替える。
   // （ダブルタップを待ってから再生すると反応が遅れるので、1回目はすぐ再生する）
   const lastTapRef = useRef<{ id: number; at: number } | null>(null)
+  /** 画面上の x 座標（clientX）を時刻に直す */
+  const clientXToTime = (clientX: number) => {
+    const el = scrollRef.current
+    if (!el) return 0
+    const x = clientX - el.getBoundingClientRect().left + el.scrollLeft - pad
+    return Math.min(duration, Math.max(0, x / pxPerSec))
+  }
   const clipClick = (id: number) => (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (props.tool === 'blade') {
+      props.onCutClip(id, clientXToTime(e.clientX))
+      return
+    }
     const now = e.timeStamp
     const last = lastTapRef.current
     if (last && last.id === id && now - last.at <= TIMELINE.doubleTapMs) {
@@ -326,9 +347,18 @@ export function Timeline(props: Props) {
 
   const showKeyframes = pxPerSec >= TIMELINE.keyframeTickMinPxPerSec
 
+  // カットツールのとき、マウスの位置に切る位置の線を出す（指では出さない）
+  const [bladeX, setBladeX] = useState<number | null>(null)
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (props.tool !== 'blade') return
+    const el = scrollRef.current
+    if (!el) return
+    setBladeX(e.clientX - el.getBoundingClientRect().left)
+  }
+
   return (
     <div
-      className="timeline"
+      className={`timeline${props.tool === 'blade' ? ' blade' : ''}`}
       title="水色はフリーズ、薄い灰色は動きとして数えなかった時間。黄色の実線が開始閾値、破線が終了閾値。ピンチで拡大・縮小"
     >
       <div
@@ -345,6 +375,8 @@ export function Timeline(props: Props) {
         onPointerCancel={onPointerUp}
         onClickCapture={onClickCapture}
         onClick={props.onTapEmpty}
+        onMouseMove={onMouseMove}
+        onMouseLeave={() => setBladeX(null)}
       >
         <div className="timeline-content" style={{ width: trackWidth + viewWidth, height: CONTENT_HEIGHT }}>
           <Filmstrip
@@ -392,12 +424,13 @@ export function Timeline(props: Props) {
                     type="button"
                     className="clip-body"
                     onClick={clipClick(c.id)}
-                    title="タップで再生、ダブルタップで残す／捨てる"
+                    title={props.tool === 'blade' ? 'タップした位置で2つに分ける' : 'タップで再生、ダブルタップで残す／捨てる'}
                     aria-label={`クリップ${i + 1}（${formatDuration(c.start)}〜${formatDuration(c.end)}・${c.keep ? '残す' : '捨てる'}）`}
                   >
                     {width > TIMELINE.clipLabelMinPx && formatDuration(c.end - c.start)}
                   </button>
                   {selected &&
+                    props.tool === 'select' &&
                     (['start', 'end'] as const).map((edge) => (
                       <span
                         key={edge}
@@ -417,6 +450,9 @@ export function Timeline(props: Props) {
         </div>
       </div>
       <div className="playhead" style={{ height: CONTENT_HEIGHT }} />
+      {props.tool === 'blade' && bladeX !== null && (
+        <div className="blade-line" style={{ left: bladeX, height: CONTENT_HEIGHT }} />
+      )}
     </div>
   )
 }
